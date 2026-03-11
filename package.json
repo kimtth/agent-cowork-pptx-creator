@@ -1,0 +1,53 @@
+{
+  "name": "pptx-slide-agent",
+  "version": "0.1.0",
+  "description": "AI-powered PowerPoint automation agent",
+  "private": true,
+  "type": "module",
+  "main": "out/main/main.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "setup:markitdown": "node scripts/setup-markitdown.mjs",
+    "test:connections": "node scripts/test-connections.mjs"
+  },
+  "dependencies": {
+    "@azure/identity": "^4.13.0",
+    "@fluentui/svg-icons": "^1.1.320",
+    "@github/copilot": "^1.0.3",
+    "@github/copilot-sdk": "^0.1.32",
+    "@github/copilot-win32-x64": "1.0.3",
+    "@iconify/react": "^6.0.2",
+    "cheerio": "^1.2.0",
+    "csv-parse": "^6.1.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.577.0",
+    "mammoth": "^1.11.0",
+    "pptxgenjs": "^4.0.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "undici": "^7.22.0",
+    "zustand": "^5.0.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.1",
+    "@types/node": "^25.4.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "electron": "^41.0.0",
+    "electron-vite": "^5.0.0",
+    "tailwindcss": "^4.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  }
+}

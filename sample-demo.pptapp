@@ -1,0 +1,258 @@
+{
+  "version": 1,
+  "savedAt": "2026-03-11T09:00:00.000Z",
+  "workspaceDir": "",
+  "title": "AI-Powered Customer Growth Strategy",
+  "slidesWork": {
+    "phase": "story",
+    "title": "AI-Powered Customer Growth Strategy",
+    "story": null,
+    "designBrief": {
+      "objective": "Persuade the board to invest in an AI-driven customer acquisition platform",
+      "audience": "C-suite executives and board members",
+      "tone": "Confident, data-driven, forward-looking",
+      "visualStyle": "Clean, modern, corporate",
+      "colorMood": "Deep blue with energetic accent",
+      "density": "Low — one key idea per slide",
+      "layoutApproach": "Action-title driven with supporting evidence below",
+      "directions": [
+        "Lead with the business problem before the solution",
+        "Use data to anchor every claim",
+        "End with a clear, concrete ask"
+      ]
+    },
+    "framework": "mckinsey",
+    "slides": [
+      {
+        "id": "slide-01",
+        "number": 1,
+        "title": "AI-Powered Customer Growth Strategy",
+        "keyMessage": "We have a proven opportunity to grow revenue 40% by deploying AI across our acquisition funnel",
+        "layout": "title",
+        "bullets": [],
+        "notes": "Open with the headline outcome — let the number land before explaining how.",
+        "icon": null,
+        "code": null,
+        "accent": "blue"
+      },
+      {
+        "id": "slide-02",
+        "number": 2,
+        "title": "Agenda",
+        "keyMessage": "Today we cover the market gap, our AI solution, the business case, and our ask",
+        "layout": "agenda",
+        "bullets": [
+          "1. The market gap we are not capturing",
+          "2. AI acquisition platform overview",
+          "3. Financial projections & ROI",
+          "4. Implementation roadmap",
+          "5. Investment ask & next steps"
+        ],
+        "notes": "Set expectations. Keep this slide brief — under 60 seconds.",
+        "icon": null,
+        "code": null,
+        "accent": "green"
+      },
+      {
+        "id": "slide-03",
+        "number": 3,
+        "title": "We Are Missing 35% of Addressable Customers",
+        "keyMessage": "Manual lead scoring leaves high-value prospects unidentified and un-nurtured",
+        "layout": "stats",
+        "bullets": [
+          "35% of TAM not engaged due to scoring blind spots",
+          "Avg. 14 days to qualify a lead vs. 2 days for top competitors",
+          "$12M in revenue lost to churn in the last 12 months",
+          "Customer acquisition cost 2× industry average"
+        ],
+        "notes": "This is the burning platform. Make sure to pause after each stat.",
+        "icon": null,
+        "code": null,
+        "accent": "orange"
+      },
+      {
+        "id": "slide-04",
+        "number": 4,
+        "title": "Our AI Platform Scores, Segments, and Converts",
+        "keyMessage": "A three-layer AI system replaces manual effort with real-time personalized outreach",
+        "layout": "bullets",
+        "bullets": [
+          "Layer 1 — Predictive Scoring: ML model trained on 5M customer events",
+          "Layer 2 — Dynamic Segmentation: real-time cluster updates every 6 hours",
+          "Layer 3 — Personalized Outreach: LLM-generated messaging per micro-segment",
+          "Fully integrated with Salesforce, HubSpot, and Marketo",
+          "Privacy-first design: zero PII leaves our data perimeter"
+        ],
+        "notes": "The three-layer framing makes the system feel structured, not black-box.",
+        "icon": null,
+        "code": null,
+        "accent": "purple"
+      },
+      {
+        "id": "slide-05",
+        "number": 5,
+        "title": "40% Revenue Growth in 18 Months at 3× ROI",
+        "keyMessage": "Conservative modelling shows payback within 8 months and $18M net new ARR by Year 2",
+        "layout": "stats",
+        "bullets": [
+          "$6M total investment (Year 1)",
+          "$18M net new ARR by end of Year 2",
+          "3× ROI over 3 years",
+          "8-month payback period",
+          "CAC reduction of 45%"
+        ],
+        "notes": "Anchor to the conservative scenario — upside case is in the appendix.",
+        "icon": null,
+        "code": null,
+        "accent": "teal"
+      },
+      {
+        "id": "slide-06",
+        "number": 6,
+        "title": "Phased Rollout: Prove, Scale, Optimize",
+        "keyMessage": "Three phases over 18 months reduce risk while building internal capability",
+        "layout": "timeline",
+        "bullets": [
+          "Phase 1 (M1–M4): Pilot on top 20% accounts — prove conversion lift",
+          "Phase 2 (M5–M10): Full funnel rollout + Salesforce integration",
+          "Phase 3 (M11–M18): Optimize models, expand to new segments",
+          "Go/no-go checkpoint at end of each phase"
+        ],
+        "notes": "The go/no-go checkpoints address board risk concerns before they are raised.",
+        "icon": null,
+        "code": null,
+        "accent": "blue"
+      },
+      {
+        "id": "slide-07",
+        "number": 7,
+        "title": "We Need $6M and a Decision Today",
+        "keyMessage": "Approve $6M in Q2 to begin the 4-month pilot — delay costs us $1.5M per quarter",
+        "layout": "summary",
+        "bullets": [
+          "Approve $6M investment in Q2 budget cycle",
+          "Assign executive sponsor by April 1",
+          "Pilot kickoff: May 15",
+          "First ROI report to board: September"
+        ],
+        "notes": "End strong with the specific ask and timeline. Leave no ambiguity.",
+        "icon": null,
+        "code": null,
+        "accent": "blue"
+      }
+    ],
+    "pptxCode": null,
+    "thinking": null,
+    "isStreaming": false
+  },
+  "chatMessages": [
+    {
+      "id": "msg-001",
+      "role": "user",
+      "content": "Create a 7-slide McKinsey-style deck for a board presentation on an AI-powered customer growth strategy. We want to show a 40% revenue uplift case.",
+      "timestamp": 1741687200000
+    },
+    {
+      "id": "msg-002",
+      "role": "assistant",
+      "content": "I've structured a 7-slide deck following the McKinsey action-title approach. Each slide leads with the main insight in the title so the story holds even if the audience only reads headlines.\n\n**Structure:**\n1. Title — headline outcome up front\n2. Agenda — orient the audience\n3. Problem — quantify what we're missing (the burning platform)\n4. Solution — three-layer AI platform overview\n5. Business case — financial projections at 3× ROI\n6. Roadmap — phased approach with go/no-go gates\n7. Ask — specific, time-bound investment request\n\nLet me know if you'd like to adjust the tone, add a competitive benchmarking slide, or swap any layout.",
+      "timestamp": 1741687215000
+    },
+    {
+      "id": "msg-003",
+      "role": "user",
+      "content": "The financial slide looks good. Can you make the ROI numbers more conservative? Change from 5× to 3× ROI.",
+      "timestamp": 1741687380000
+    },
+    {
+      "id": "msg-004",
+      "role": "assistant",
+      "content": "Updated Slide 5 to reflect conservative 3× ROI modelling. Changed:\n- ROI: 5× → **3×**\n- Payback period: 6 months → **8 months**\n- Net new ARR: $24M → **$18M** by end of Year 2\n\nThe upside case (5×) can live in an appendix slide if the board wants to see it.",
+      "timestamp": 1741687395000
+    }
+  ],
+  "palette": {
+    "seeds": ["#0057D9", "#7B2FBE"],
+    "colors": [
+      { "name": "Deep Blue", "hex": "#0057D9" },
+      { "name": "Blue 80", "hex": "#2B72E8" },
+      { "name": "Blue 60", "hex": "#5A99F2" },
+      { "name": "Blue 40", "hex": "#96BFF7" },
+      { "name": "Blue 20", "hex": "#D0E4FD" },
+      { "name": "Violet", "hex": "#7B2FBE" },
+      { "name": "Violet 80", "hex": "#9B56D4" },
+      { "name": "Violet 60", "hex": "#BC84E8" },
+      { "name": "Teal", "hex": "#007A87" },
+      { "name": "Teal Light", "hex": "#00B4C4" },
+      { "name": "Charcoal", "hex": "#1B1B2F" },
+      { "name": "White", "hex": "#FFFFFF" }
+    ],
+    "slots": {
+      "dk1": "1B1B2F",
+      "lt1": "FFFFFF",
+      "dk2": "0057D9",
+      "lt2": "D0E4FD",
+      "accent1": "0057D9",
+      "accent2": "7B2FBE",
+      "accent3": "007A87",
+      "accent4": "00B4C4",
+      "accent5": "2B72E8",
+      "accent6": "9B56D4",
+      "hlink": "2B72E8",
+      "folHlink": "9B56D4"
+    },
+    "tokens": {
+      "name": "Corporate Blue",
+      "slots": {
+        "dk1": "1B1B2F",
+        "lt1": "FFFFFF",
+        "dk2": "0057D9",
+        "lt2": "D0E4FD",
+        "accent1": "0057D9",
+        "accent2": "7B2FBE",
+        "accent3": "007A87",
+        "accent4": "00B4C4",
+        "accent5": "2B72E8",
+        "accent6": "9B56D4",
+        "hlink": "2B72E8",
+        "folHlink": "9B56D4"
+      },
+      "colors": [
+        { "name": "Deep Blue", "hex": "#0057D9" },
+        { "name": "Blue 80", "hex": "#2B72E8" },
+        { "name": "Blue 60", "hex": "#5A99F2" },
+        { "name": "Blue 40", "hex": "#96BFF7" },
+        { "name": "Blue 20", "hex": "#D0E4FD" },
+        { "name": "Violet", "hex": "#7B2FBE" },
+        { "name": "Violet 80", "hex": "#9B56D4" },
+        { "name": "Violet 60", "hex": "#BC84E8" },
+        { "name": "Teal", "hex": "#007A87" },
+        { "name": "Teal Light", "hex": "#00B4C4" },
+        { "name": "Charcoal", "hex": "#1B1B2F" },
+        { "name": "White", "hex": "#FFFFFF" }
+      ],
+      "C": {
+        "DARK": "1B1B2F",
+        "DARK2": "0057D9",
+        "LIGHT": "FFFFFF",
+        "LIGHT2": "D0E4FD",
+        "ACCENT1": "0057D9",
+        "ACCENT2": "7B2FBE",
+        "ACCENT3": "007A87",
+        "ACCENT4": "00B4C4",
+        "ACCENT5": "2B72E8",
+        "ACCENT6": "9B56D4",
+        "LINK": "2B72E8",
+        "USED_LINK": "9B56D4",
+        "PRIMARY": "0057D9",
+        "SECONDARY": "7B2FBE",
+        "BG": "FFFFFF",
+        "TEXT": "1B1B2F",
+        "WHITE": "FFFFFF",
+        "BORDER": "D0E4FD"
+      }
+    },
+    "themeName": "Corporate Blue",
+    "iconDir": null
+  }
+}

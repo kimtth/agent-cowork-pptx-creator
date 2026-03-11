@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": { "@/*": ["src/*"] }
+  },
+  "include": [
+    "electron/**/*.ts",
+    "electron/ipc/data-consumer.ts",
+    "electron/ipc/workspace-utils.ts",
+    "electron.vite.config.ts",
+    "scripts/**/*.mjs",
+    "src/domain/**/*.ts"
+  ]
+}

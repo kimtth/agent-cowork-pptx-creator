@@ -1,0 +1,41 @@
+/**
+ * Application: Palette Use Case
+ * Assembles ThemeTokens from slots + colors (renderer-side).
+ */
+
+import type { PaletteColor, ThemeSlots, ThemeTokens } from '../domain/entities/palette';
+
+export function buildThemeTokens(name: string, slots: ThemeSlots, colors: PaletteColor[]): ThemeTokens {
+  const C: ThemeTokens['C'] = {
+    DARK: slots.dk1,
+    DARK2: slots.dk2,
+    LIGHT: slots.lt1,
+    LIGHT2: slots.lt2,
+    ACCENT1: slots.accent1,
+    ACCENT2: slots.accent2,
+    ACCENT3: slots.accent3,
+    ACCENT4: slots.accent4,
+    ACCENT5: slots.accent5,
+    ACCENT6: slots.accent6,
+    LINK: slots.hlink,
+    USED_LINK: slots.folHlink,
+    PRIMARY: slots.accent1,
+    SECONDARY: slots.accent4,
+    BG: slots.lt1,
+    TEXT: slots.dk1,
+    WHITE: slots.lt1,
+    BORDER: slots.lt2,
+  };
+  return { name, slots, colors, C };
+}
+
+/** Parse `ColorName | #HEX` lines */
+export function parsePaletteText(text: string): PaletteColor[] {
+  return text
+    .split('\n')
+    .map((line) => {
+      const match = line.match(/^(.+?)\s*\|\s*(#[0-9A-Fa-f]{6})/);
+      return match ? { name: match[1].trim(), hex: match[2].toUpperCase() } : null;
+    })
+    .filter((c): c is PaletteColor => c !== null);
+}

@@ -1,0 +1,7 @@
+packages:
+  - "."
+  - "!ref/**"
+
+allowBuilds:
+  electron: true
+  esbuild: true
