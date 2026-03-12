@@ -6,7 +6,7 @@
 import type { ScenarioPayload, SlideUpdatePayload } from '../entities/slide-work';
 import type { PaletteColor, ThemeSlots, ThemeTokens } from '../entities/palette';
 import type { IconifyCollectionId } from '../icons/iconify';
-import type { GeneratedSlidePreview } from '../entities/slide-work';
+import type { WorkflowConfig } from '../workflows/workflow-config';
 
 export interface SourceArtifact {
   markdownPath: string;
@@ -34,6 +34,43 @@ export interface ScrapeResult {
   consumed?: SourceArtifact;
 }
 
+export interface ImageSearchRequest {
+  number: number;
+  title: string;
+  keyMessage: string;
+  bullets: string[];
+  imageQuery?: string | null;
+  imageQueries?: string[];
+}
+
+export interface ImageSearchCandidate {
+  id: string;
+  provider: 'direct' | 'google';
+  searchQuery: string | null;
+  title: string | null;
+  imageUrl: string | null;
+  thumbnailUrl: string | null;
+  sourcePageUrl: string | null;
+  attribution: string | null;
+  inlineImageDataUrl: string | null;
+}
+
+export interface ImageSearchResult {
+  query: string;
+  candidates: ImageSearchCandidate[];
+}
+
+export interface ResolvedSlideImage {
+  id: string;
+  number: number;
+  imageQuery: string | null;
+  imageUrl: string | null;
+  imagePath: string | null;
+  imageAttribution: string | null;
+  sourcePageUrl: string | null;
+  thumbnailUrl: string | null;
+}
+
 export interface IpcChatAPI {
   send(
     message: string,
@@ -42,8 +79,11 @@ export interface IpcChatAPI {
       title: string;
       slides: import('../entities/slide-work').SlideItem[];
       designBrief: import('../entities/slide-work').DesignBrief | null;
+      designStyle: import('../entities/slide-work').DesignStyle | null;
       framework: import('../entities/slide-work').FrameworkType | null;
+      pptxBuildError: string | null;
       theme: ThemeTokens | null;
+      workflow: WorkflowConfig | null;
       dataSources: DataFile[];
       urlSources: Array<{ url: string; status: string; result?: ScrapeResult }>;
       iconProvider: 'iconify';
@@ -51,6 +91,8 @@ export interface IpcChatAPI {
       availableIcons: string[];
     },
   ): void;
+
+  cancel(): void;
 
   onStream(cb: (delta: { content?: string; thinking?: string }) => void): () => void;
   onScenario(cb: (payload: ScenarioPayload) => void): () => void;
@@ -72,13 +114,11 @@ export interface IpcPptxAPI {
     themeTokens: ThemeTokens | null,
     title: string,
   ): Promise<{ success: boolean; path?: string; error?: string }>;
-  exportSlides(
-    slides: import('../entities/slide-work').SlideItem[],
+  renderPreview(
+    code: string,
     themeTokens: ThemeTokens | null,
     title: string,
-  ): Promise<{ success: boolean; path?: string; error?: string }>;
-  executeCode(code: string, themeTokens: ThemeTokens | null): Promise<ArrayBuffer>;
-  inspectCode(code: string, themeTokens: ThemeTokens | null): Promise<GeneratedSlidePreview[]>;
+  ): Promise<{ success: boolean; imagePaths?: string[]; error?: string; warning?: string }>;
 }
 
 export interface IpcFsAPI {
@@ -91,19 +131,9 @@ export interface IpcScrapeAPI {
 }
 
 export interface IpcImagesAPI {
-  resolveForSlides(slides: Array<{
-    number: number;
-    title: string;
-    keyMessage: string;
-    bullets: string[];
-    imageQuery?: string | null;
-  }>): Promise<Array<{
-    number: number;
-    imageQuery: string | null;
-    imageUrl: string | null;
-    imagePath: string | null;
-    imageAttribution: string | null;
-  }>>;
+  searchForSlide(slide: ImageSearchRequest): Promise<ImageSearchResult>;
+  downloadForSlide(slide: ImageSearchRequest, candidate: ImageSearchCandidate): Promise<ResolvedSlideImage>;
+  resolveForSlides(slides: ImageSearchRequest[]): Promise<ResolvedSlideImage[]>;
 }
 
 export interface IpcSettingsAPI {

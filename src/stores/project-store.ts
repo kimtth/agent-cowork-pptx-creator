@@ -14,14 +14,25 @@ import { DEFAULT_ICONIFY_COLLECTION } from '../domain/icons/iconify';
 function normalizeLoadedWork(work: PptAppProject['slidesWork']) {
   return {
     ...work,
+    designStyle: work.designStyle ?? null,
     framework: work.framework ?? null,
     slides: (work.slides ?? []).map((slide) => ({
       ...slide,
       icon: slide.icon ?? null,
       imageQuery: slide.imageQuery ?? null,
+      imageQueries: slide.imageQueries ?? (slide.imageQuery ? [slide.imageQuery] : []),
       imageUrl: slide.imageUrl ?? null,
       imagePath: slide.imagePath ?? null,
       imageAttribution: slide.imageAttribution ?? null,
+      selectedImages: slide.selectedImages ?? (slide.imagePath ? [{
+        id: slide.imagePath,
+        imageQuery: slide.imageQuery ?? null,
+        imageUrl: slide.imageUrl ?? null,
+        imagePath: slide.imagePath ?? null,
+        imageAttribution: slide.imageAttribution ?? null,
+        sourcePageUrl: slide.imageUrl ?? null,
+        thumbnailUrl: slide.imageUrl ?? null,
+      }] : []),
     })),
   };
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, X } from 'lucide-react'
+import { Send, Loader2, X, ChevronDown, ChevronRight, FileCode2, Lightbulb } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useChatStore } from '../../stores/chat-store'
@@ -8,44 +8,182 @@ import { usePaletteStore } from '../../stores/palette-store'
 import { useDataSourcesStore } from '../../stores/data-sources-store'
 import { createUserMessage, historyToIpc } from '../../application/chat-use-case'
 import { getAvailableIconChoices } from '../../domain/icons/iconify'
+import { getWorkflowConfig, type WorkflowId } from '../../domain/workflows/workflow-config'
+
+/** Completed assistant messages: full markdown, auto-collapse if >10 lines */
+function AssistantMarkdownMessage({ content }: { content: string }) {
+  const lineCount = content.split(/\r?\n/).length
+  const isLong = lineCount > 10
+  const [expanded, setExpanded] = useState(!isLong)
+
+  return (
+    <div
+      className="text-sm prose prose-sm max-w-none"
+      style={{ background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--panel-border)' }}
+    >
+      {isLong && (
+        <div
+          className="flex items-center justify-between px-4 py-2 border-b"
+          style={{ borderColor: 'var(--panel-border)' }}
+        >
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{lineCount} lines</span>
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="flex items-center gap-1 border px-2 py-1 text-[11px] font-semibold transition-colors"
+            style={{ borderColor: 'var(--panel-border)', color: 'var(--text-primary)', background: 'var(--surface-hover)' }}
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <span>{expanded ? 'Collapse' : 'Expand'}</span>
+          </button>
+        </div>
+      )}
+      {expanded && (
+        <div className="px-4 py-3">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Streaming content: plain text — no markdown parsing to keep UI responsive */
+function StreamingTextMessage({ content }: { content: string }) {
+  return (
+    <pre
+      className="px-4 py-3 text-sm whitespace-pre-wrap break-words leading-relaxed"
+      style={{
+        background: 'var(--surface)',
+        color: 'var(--text-primary)',
+        border: '1px solid var(--panel-border)',
+        fontFamily: 'inherit',
+      }}
+    >
+      {content}
+    </pre>
+  )
+}
+
+/** Isolated component for streaming — subscribes to pending state independently */
+function StreamingBubble({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElement | null> }) {
+  const pendingContent = useChatStore((s) => s.pendingContent)
+  const pendingThinking = useChatStore((s) => s.pendingThinking)
+  const streaming = useSlidesStore((s) => s.work.isStreaming)
+
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!pendingContent && !pendingThinking) return
+    if (scrollTimerRef.current) return
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null
+      scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, 300)
+  }, [pendingContent, pendingThinking, scrollRef])
+
+  if (!streaming) return null
+
+  if (!pendingContent && !pendingThinking) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-widest px-1" style={{ color: 'var(--text-muted)' }}>
+          Agent
+        </span>
+        <div className="px-4 py-3 border" style={{ background: 'var(--surface)', borderColor: 'var(--panel-border)' }}>
+          <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-[11px] font-semibold uppercase tracking-widest px-1" style={{ color: 'var(--text-muted)' }}>
+        Agent
+      </span>
+      {pendingThinking && (
+        <div
+          className="text-xs px-4 py-3 border italic"
+          style={{ color: 'var(--text-secondary)', background: 'var(--surface-hover)', borderColor: 'var(--panel-border)' }}
+        >
+          {pendingThinking.slice(-200)}
+        </div>
+      )}
+      {pendingContent && <StreamingTextMessage content={pendingContent} />}
+    </div>
+  )
+}
 
 export function ChatPanel() {
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const { messages, pendingContent, pendingThinking, addMessage, removeMessage } = useChatStore()
+  const messages = useChatStore((s) => s.messages)
+  const addMessage = useChatStore((s) => s.addMessage)
+  const removeMessage = useChatStore((s) => s.removeMessage)
   const { work, setStreaming } = useSlidesStore()
   const streaming = work.isStreaming
   const { tokens, selectedIconCollection } = usePaletteStore()
   const { files: dataSources, urls: urlSources } = useDataSourcesStore()
 
+  // Scroll for new completed messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, pendingContent])
+  }, [messages])
 
-  const send = async () => {
-    const msg = input.trim()
+  const sendMessage = async (rawMessage: string, options?: { clearInput?: boolean; workflowId?: WorkflowId | null }) => {
+    const msg = rawMessage.trim()
     if (!msg || streaming) return
-    setInput('')
+    if (options?.clearInput !== false) {
+      setInput('')
+    }
     setStreaming(true)
 
     addMessage(createUserMessage(msg))
 
     const availableIcons = getAvailableIconChoices(selectedIconCollection)
+    const workflow = options?.workflowId ? getWorkflowConfig(options.workflowId) : null
 
     window.electronAPI.chat.send(msg, historyToIpc(messages), {
       title: work.title,
       slides: work.slides,
       designBrief: work.designBrief,
+      designStyle: work.designStyle,
       framework: work.framework,
+      pptxBuildError: work.pptxBuildError,
       theme: tokens,
+      workflow,
       dataSources,
       urlSources,
       iconProvider: 'iconify',
       iconCollection: selectedIconCollection,
       availableIcons,
     })
+  }
+
+  const send = async () => {
+    await sendMessage(input)
+  }
+
+  const brainstorm = async () => {
+    if (streaming) return
+    const workflow = getWorkflowConfig('prestaging')
+    const prompt = input.trim() || workflow.triggerPrompt
+    await sendMessage(prompt, { workflowId: workflow.id })
+  }
+
+  const createPptx = async () => {
+    if (streaming || work.slides.length === 0) return
+
+    const workflow = getWorkflowConfig('create-pptx')
+    const prompt = input.trim() || workflow.triggerPrompt
+
+    await sendMessage(prompt, { clearInput: false, workflowId: workflow.id })
+  }
+
+  const cancel = () => {
+    if (!streaming) return
+    window.electronAPI.chat.cancel()
   }
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -119,56 +257,14 @@ export function ChatPanel() {
                     <pre className="mt-2 whitespace-pre-wrap leading-relaxed">{msg.thinking}</pre>
                   </details>
                 )}
-                <div
-                  className="px-4 py-3 text-sm prose prose-sm max-w-none"
-                  style={{ background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--panel-border)' }}
-                >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                </div>
+                <AssistantMarkdownMessage content={msg.content} />
               </div>
             )}
           </div>
         ))}
 
-        {/* Streaming assistant message */}
-        {streaming && (pendingContent || pendingThinking) && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-widest px-1" style={{ color: 'var(--text-muted)' }}>
-              Agent
-            </span>
-            {pendingThinking && (
-              <div
-                className="text-xs px-4 py-3 border italic"
-                style={{ color: 'var(--text-secondary)', background: 'var(--surface-hover)', borderColor: 'var(--panel-border)' }}
-              >
-                {pendingThinking.slice(-200)}
-              </div>
-            )}
-            {pendingContent && (
-              <div
-                className="px-4 py-3 text-sm prose prose-sm max-w-none"
-                style={{ background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--panel-border)' }}
-              >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{pendingContent}</ReactMarkdown>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Streaming indicator */}
-        {streaming && !pendingContent && !pendingThinking && (
-          <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-widest px-1" style={{ color: 'var(--text-muted)' }}>
-              Agent
-            </span>
-            <div
-              className="px-4 py-3 border"
-              style={{ background: 'var(--surface)', borderColor: 'var(--panel-border)' }}
-            >
-              <Loader2 size={14} className="animate-spin" style={{ color: 'var(--text-muted)' }} />
-            </div>
-          </div>
-        )}
+        {/* Streaming — isolated component to avoid parent re-renders */}
+        <StreamingBubble scrollRef={messagesEndRef} />
 
         <div ref={messagesEndRef} />
       </div>
@@ -197,24 +293,79 @@ export function ChatPanel() {
             background: 'var(--input-bg)',
           }}
         />
-        <div className="flex items-center justify-between px-3 py-2">
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Enter ↵ send · Shift+Enter new line</p>
-          <button
-            onClick={send}
-            disabled={!input.trim() || streaming}
-            className="flex items-center justify-center gap-2 text-xs font-semibold disabled:opacity-40 transition-colors"
-            style={{
-              background: 'var(--accent)',
-              color: '#fff',
-              height: 32,
-              paddingLeft: 16,
-              paddingRight: 16,
-            }}
-            aria-label="Send"
-          >
-            {streaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            <span>{streaming ? 'Sending' : 'Send'}</span>
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <p className="min-w-0 text-xs" style={{ color: 'var(--text-muted)' }}>Enter ↵ send · Shift+Enter new line</p>
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
+            <button
+              onClick={brainstorm}
+              disabled={streaming}
+              className="flex shrink-0 items-center justify-center gap-2 text-xs font-semibold disabled:opacity-40 transition-colors"
+              style={{
+                background: 'var(--surface-hover)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--panel-border)',
+                height: 32,
+                paddingLeft: 16,
+                paddingRight: 16,
+              }}
+              aria-label="Brainstorm"
+            >
+              {streaming ? <Loader2 size={14} className="animate-spin" /> : <Lightbulb size={14} />}
+              <span>Brainstorm</span>
+            </button>
+            <button
+              onClick={createPptx}
+              disabled={streaming || work.slides.length === 0}
+              className="flex shrink-0 items-center justify-center gap-2 text-xs font-semibold disabled:opacity-40 transition-colors"
+              style={{
+                background: 'var(--surface-hover)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--panel-border)',
+                height: 32,
+                paddingLeft: 16,
+                paddingRight: 16,
+              }}
+              aria-label="Create PPTX"
+            >
+              {streaming ? <Loader2 size={14} className="animate-spin" /> : <FileCode2 size={14} />}
+              <span>Create PPTX</span>
+            </button>
+            {streaming && (
+              <button
+                onClick={cancel}
+                className="flex shrink-0 items-center justify-center gap-2 text-xs font-semibold transition-colors"
+                style={{
+                  background: 'var(--surface-hover)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--panel-border)',
+                  height: 32,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                }}
+                aria-label="Cancel"
+              >
+                <X size={14} />
+                <span>Cancel</span>
+              </button>
+            )}
+            <button
+              onClick={send}
+              disabled={!input.trim() || streaming}
+              className="flex shrink-0 items-center justify-center gap-2 text-xs font-semibold disabled:opacity-40 transition-colors"
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                height: 32,
+                minWidth: 90,
+                paddingLeft: 16,
+                paddingRight: 16,
+              }}
+              aria-label="Send"
+            >
+              {streaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              <span>{streaming ? 'Sending' : 'Send'}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

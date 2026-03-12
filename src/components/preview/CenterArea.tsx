@@ -1,17 +1,14 @@
 /**
- * CenterArea: slide carousel + toolbar
+ * CenterArea: locally rendered PPTX preview + export toolbar
  */
 
 import { useEffect, useState } from 'react'
-import { Download, Palette, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Download, Palette, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useSlidesStore } from '../../stores/slides-store'
 import { usePaletteStore } from '../../stores/palette-store'
 import { useChatStore } from '../../stores/chat-store'
-import { SlideCard } from './SlideCard.tsx'
-import { GeneratedSlideCard } from './GeneratedSlideCard.tsx'
+import { PptxPreviewCard } from './PptxPreviewCard.tsx'
 import { createAssistantMessage } from '../../application/chat-use-case'
-
-const CARD_SCALE = 0.55
 
 export function CenterArea() {
   const { work } = useSlidesStore()
@@ -20,22 +17,70 @@ export function CenterArea() {
   const [selected, setSelected] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [rendering, setRendering] = useState(false)
+  const [previewImages, setPreviewImages] = useState<string[]>([])
 
-  const generatedSlides = work.generatedPreviewSlides
-  const slides = generatedSlides ?? work.slides
+  const slides = work.slides
 
   useEffect(() => {
-    setSelected((current) => Math.min(current, Math.max(slides.length - 1, 0)))
-  }, [slides.length])
+    setSelected((current) => Math.min(current, Math.max(previewImages.length - 1, 0)))
+  }, [previewImages.length])
+
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      if (!work.pptxCode) {
+        setPreviewImages([])
+        setPreviewError(null)
+        setRendering(false)
+        return
+      }
+
+      setRendering(true)
+      setPreviewError(null)
+      const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation')
+      if (cancelled) return
+
+      if (result.success) {
+        setPreviewImages(result.imagePaths ?? [])
+        if (result.warning) setPreviewError(result.warning)
+      } else {
+        setPreviewImages([])
+        setPreviewError(result.error ?? 'Failed to render slide preview')
+      }
+      setRendering(false)
+    }
+
+    void run()
+
+    return () => {
+      cancelled = true
+    }
+  }, [work.pptxCode, tokens, work.title])
+
+  const refreshPreview = async () => {
+    if (!work.pptxCode) return
+    setRendering(true)
+    setPreviewError(null)
+    const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation')
+    if (result.success) {
+      setPreviewImages(result.imagePaths ?? [])
+      if (result.warning) setPreviewError(result.warning)
+    } else {
+      setPreviewImages([])
+      setPreviewError(result.error ?? 'Failed to render slide preview')
+    }
+    setRendering(false)
+  }
 
   const exportPptx = async () => {
-    if (slides.length === 0) return
+    if (!work.pptxCode) return
     setExporting(true)
     setExportError(null)
     try {
-      const result = work.pptxCode
-        ? await window.electronAPI.pptx.generate(work.pptxCode, tokens, work.title || 'presentation')
-        : await window.electronAPI.pptx.exportSlides(work.slides, tokens, work.title || 'presentation')
+      const result = await window.electronAPI.pptx.generate(work.pptxCode, tokens, work.title || 'presentation')
 
       if (result.success) {
         addMessage(createAssistantMessage(`PPTX generation complete.${result.path ? ` Saved to ${result.path}.` : ''}`))
@@ -62,13 +107,24 @@ export function CenterArea() {
       >
         <span className="text-sm font-semibold" style={{ color: 'var(--text-secondary)' }}>
           Preview
-          {slides.length > 0 && (
+          {previewImages.length > 0 && (
             <span className="ml-2 text-sm font-normal" style={{ color: 'var(--text-muted)' }}>
-              {selected + 1} / {slides.length}
+              {selected + 1} / {previewImages.length}
             </span>
           )}
         </span>
         <div className="flex items-center gap-2">
+          {work.pptxCode && (
+            <button
+              onClick={() => void refreshPreview()}
+              disabled={rendering}
+              className="flex h-8 items-center gap-1.5 border px-3 text-xs font-medium transition-colors disabled:opacity-50"
+              style={{ background: 'var(--surface-hover)', color: 'var(--text-primary)', borderColor: 'var(--panel-border)' }}
+            >
+              <RefreshCw size={12} className={rendering ? 'animate-spin' : ''} />
+              {rendering ? 'Rendering…' : 'Refresh Preview'}
+            </button>
+          )}
           {tokens && (
             <button
               onClick={exportThmx}
@@ -79,7 +135,7 @@ export function CenterArea() {
               .thmx
             </button>
           )}
-          {slides.length > 0 && (
+          {work.pptxCode && (
             <button
               onClick={exportPptx}
               disabled={exporting}
@@ -102,20 +158,35 @@ export function CenterArea() {
         </div>
       )}
 
+      {previewError && (
+        <div
+          className="flex-none border px-4 py-2 text-xs"
+          style={{ borderColor: '#fed7aa', background: '#fff7ed', color: '#c2410c' }}
+        >
+          {previewError}
+        </div>
+      )}
+
       {/* Main slide view */}
       <div
         className="flex-1 relative flex items-center justify-center overflow-hidden border p-6"
         style={{ background: 'var(--surface)', borderColor: 'var(--panel-border)' }}
       >
-        {slides.length === 0 ? (
+        {rendering ? (
+          <div className="text-center" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-5xl mb-4 opacity-30">🖼️</div>
+            <p className="text-sm">Rendering slide previews…</p>
+            <p className="text-xs mt-1">The app is generating the deck and exporting slide images locally.</p>
+          </div>
+        ) : previewImages.length === 0 ? (
           <div className="text-center" style={{ color: 'var(--text-muted)' }}>
             <div className="text-5xl mb-4 opacity-30">🖥️</div>
-            <p className="text-sm">Slide preview will appear here.</p>
-            <p className="text-xs mt-1">Start a conversation in the chat panel.</p>
+            <p className="text-sm">Rendered slide previews will appear here.</p>
+            <p className="text-xs mt-1">Create PPTX code first, then the app will render slide images locally.</p>
+            <p className="text-xs mt-1">Windows preview rendering requires Microsoft PowerPoint to be installed.</p>
           </div>
         ) : (
           <>
-            {/* Previous button — absolutely positioned inside the main container */}
             <button
               onClick={() => setSelected((i) => Math.max(0, i - 1))}
               disabled={selected === 0}
@@ -126,25 +197,16 @@ export function CenterArea() {
               <ChevronLeft size={18} />
             </button>
 
-            {generatedSlides ? (
-              <GeneratedSlideCard
-                slide={generatedSlides[selected]}
-                scale={CARD_SCALE}
-                selected
-              />
-            ) : (
-              <SlideCard
-                slide={work.slides[selected]}
-                theme={tokens}
-                scale={CARD_SCALE}
-                selected
-              />
-            )}
+            <PptxPreviewCard
+              title={slides[selected]?.title ?? `Slide ${selected + 1}`}
+              imagePath={previewImages[selected]}
+              scale={0.55}
+              selected
+            />
 
-            {/* Next button */}
             <button
-              onClick={() => setSelected((i) => Math.min(slides.length - 1, i + 1))}
-              disabled={selected === slides.length - 1}
+              onClick={() => setSelected((i) => Math.min(previewImages.length - 1, i + 1))}
+              disabled={selected === previewImages.length - 1}
               className="absolute right-3 top-1/2 -translate-y-1/2 z-10 w-8 h-8 flex items-center justify-center border disabled:opacity-20 transition-opacity"
               style={{ color: 'var(--text-secondary)', borderColor: 'var(--panel-border)', background: 'var(--surface)' }}
               aria-label="Next slide"
@@ -155,36 +217,21 @@ export function CenterArea() {
         )}
       </div>
 
-      {/* Thumbnail strip */}
-      {slides.length > 1 && (
+      {previewImages.length > 1 && (
         <div
           className="flex-none flex gap-3 overflow-x-auto border px-4 py-3"
           style={{ borderColor: 'var(--panel-border)', background: 'var(--surface)' }}
         >
-          {generatedSlides ? generatedSlides.map((slide, i) => (
+          {previewImages.map((imagePath, i) => (
             <button
-              key={slide.id}
+              key={imagePath}
               onClick={() => setSelected(i)}
               className="flex-none focus:outline-none"
-              aria-label={`Slide ${slide.number}: ${slide.title}`}
+              aria-label={`Slide ${i + 1}: ${slides[i]?.title ?? `Slide ${i + 1}`}`}
             >
-              <GeneratedSlideCard
-                slide={slide}
-                scale={0.12}
-                selected={i === selected}
-                onClick={() => setSelected(i)}
-              />
-            </button>
-          )) : work.slides.map((slide, i) => (
-            <button
-              key={slide.id}
-              onClick={() => setSelected(i)}
-              className="flex-none focus:outline-none"
-              aria-label={`Slide ${slide.number}: ${slide.title}`}
-            >
-              <SlideCard
-                slide={slide}
-                theme={tokens}
+              <PptxPreviewCard
+                title={slides[i]?.title ?? `Slide ${i + 1}`}
+                imagePath={imagePath}
                 scale={0.12}
                 selected={i === selected}
                 onClick={() => setSelected(i)}

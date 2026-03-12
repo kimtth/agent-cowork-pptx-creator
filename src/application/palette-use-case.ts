@@ -20,7 +20,7 @@ export function buildThemeTokens(name: string, slots: ThemeSlots, colors: Palett
     LINK: slots.hlink,
     USED_LINK: slots.folHlink,
     PRIMARY: slots.accent1,
-    SECONDARY: slots.accent4,
+    SECONDARY: slots.accent2,
     BG: slots.lt1,
     TEXT: slots.dk1,
     WHITE: slots.lt1,

@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react'
-import { FolderOpen, Link, X, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
+import { FolderOpen, Link, X, Loader2, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import type { DataFile } from '../../domain/ports/ipc'
 import { useDataSourcesStore } from '../../stores/data-sources-store'
 
@@ -11,6 +11,11 @@ export function DataSources() {
   const { files, urls, setFiles, setUrls } = useDataSourcesStore()
   const [urlInput, setUrlInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const hasSources = files.length > 0 || urls.length > 0
+  const hasPendingUrls = urls.some((entry) => entry.status === 'loading')
+  const canRecreateContents = hasSources && !hasPendingUrls && !refreshing
 
   const openFiles = async () => {
     setLoading(true)
@@ -50,10 +55,79 @@ export function DataSources() {
     setUrls(useDataSourcesStore.getState().urls.filter((u) => u.url !== url))
   }
 
+  async function refreshFiles() {
+    const currentFiles = useDataSourcesStore.getState().files
+    if (currentFiles.length === 0) return
+
+    const refreshedFiles = await Promise.allSettled(
+      currentFiles.map((file) => window.electronAPI.fs.readFile(file.path)),
+    )
+
+    setFiles(refreshedFiles.map((result, index) => (
+      result.status === 'fulfilled' ? result.value : currentFiles[index]
+    )))
+  }
+
+  async function refreshUrls() {
+    const currentUrls = useDataSourcesStore.getState().urls
+    if (currentUrls.length === 0) return
+
+    setUrls(currentUrls.map((entry) => ({ ...entry, status: 'loading' as const })))
+
+    const refreshedUrls = await Promise.allSettled(
+      currentUrls.map((entry) => window.electronAPI.scrape.scrapeUrl(entry.url)),
+    )
+
+    setUrls(currentUrls.map((entry, index) => {
+      const result = refreshedUrls[index]
+      if (result.status === 'fulfilled') {
+        return {
+          url: entry.url,
+          status: result.value.error ? 'error' as const : 'ok' as const,
+          result: result.value,
+        }
+      }
+
+      return {
+        ...entry,
+        status: 'error' as const,
+      }
+    }))
+  }
+
+  const recreateSlideContents = async () => {
+    if (!canRecreateContents) return
+
+    setRefreshing(true)
+    try {
+      await Promise.all([refreshFiles(), refreshUrls()])
+    } finally {
+      setRefreshing(false)
+    }
+  }
+
   const typeIcon = (t: DataFile['type']) => t === 'csv' ? '📊' : t === 'docx' ? '📄' : '📝'
 
   return (
     <div className="flex flex-col h-full overflow-y-auto gap-3 p-3" style={{ background: 'var(--surface)' }}>
+
+      <section className="border" style={{ borderColor: 'var(--panel-border)', background: 'var(--surface)' }}>
+        <div className="px-4 py-3">
+          <button
+            onClick={recreateSlideContents}
+            disabled={!canRecreateContents}
+            className="flex w-full items-center justify-center gap-2 h-9 px-3 text-xs font-semibold border transition-colors disabled:opacity-40"
+            style={{
+              background: canRecreateContents ? 'var(--surface-hover)' : 'var(--surface)',
+              color: 'var(--text-primary)',
+              borderColor: 'var(--panel-border)',
+            }}
+          >
+            <RefreshCw size={12} className={refreshing ? 'animate-spin' : undefined} />
+            Recreate source contents for files and URLs
+          </button>
+        </div>
+      </section>
 
       <section className="border" style={{ borderColor: 'var(--panel-border)', background: 'var(--surface)' }}>
         <div

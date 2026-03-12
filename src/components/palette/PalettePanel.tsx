@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react'
 import { Icon } from '@iconify/react'
-import { Loader2, Sparkles, Download } from 'lucide-react'
+import { Loader2, Sparkles, Download, X } from 'lucide-react'
 import { usePaletteStore } from '../../stores/palette-store.ts'
 import { PaletteCanvas } from './PaletteCanvas.tsx'
 import { ThemeSlotEditor } from './ThemeSlotEditor.tsx'
@@ -32,6 +32,10 @@ export function PalettePanel() {
 
   const generate = async () => {
     setError(null)
+    if (seeds.length === 0) {
+      setError('Add at least one seed color before generating a palette')
+      return
+    }
     setGenerating(true)
     try {
       const generated = await window.electronAPI.theme.generatePalette(seeds)
@@ -71,6 +75,16 @@ export function PalettePanel() {
                 className="relative w-10 h-10 overflow-hidden border-2 cursor-pointer"
                 style={{ borderColor: 'var(--panel-border)' }}
               >
+                <button
+                  type="button"
+                  onClick={() => setSeeds(seeds.filter((_, index) => index !== i))}
+                  className="absolute right-0 top-0 z-10 flex h-4 w-4 items-center justify-center"
+                  style={{ background: 'rgba(15, 23, 42, 0.78)', color: '#fff' }}
+                  aria-label={`Remove seed color ${i + 1}`}
+                  title="Remove seed color"
+                >
+                  <X size={10} />
+                </button>
                 <input
                   type="color"
                   value={seed}

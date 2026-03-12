@@ -20,8 +20,8 @@ const FIELDS: { key: string; label: string; placeholder: string; secret?: boolea
   {
     key: 'MODEL_PROVIDER',
     label: 'Model Provider',
-    placeholder: 'openai or azure (optional)',
-    hint: 'Optional. If AZURE_OPENAI_ENDPOINT is set, the app will use Azure OpenAI / Foundry automatically.',
+    placeholder: 'github or azure (optional)',
+    hint: 'Use github for GitHub-hosted Copilot models such as gpt-5.4. If AZURE_OPENAI_ENDPOINT is set, the app uses Azure OpenAI / Foundry automatically.',
   },
   {
     key: 'AZURE_OPENAI_ENDPOINT',
@@ -45,8 +45,8 @@ const FIELDS: { key: string; label: string; placeholder: string; secret?: boolea
   {
     key: 'MODEL_NAME',
     label: 'Model Name',
-    placeholder: 'gpt-5',
-    hint: 'Deployment or model name (optional)',
+    placeholder: 'gpt-5.4',
+    hint: 'For github, use a GitHub-hosted Copilot model name such as gpt-5.4. For azure, use the deployment or model name.',
   },
 ]
 
@@ -79,7 +79,6 @@ export function SettingsModal({ onClose }: Props) {
       setSaving(false)
     }
   }
-
   return (
     /* Backdrop */
     <div
@@ -122,7 +121,10 @@ export function SettingsModal({ onClose }: Props) {
                 Values are saved to the app's user-data folder and applied to the running process immediately.
               </p>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                For slide images, the app works without an API key by using direct image URLs in `imageQuery`, Google image search discovery, and a public fallback provider.
+                For slide images, the app supports direct image URLs in `imageQuery` and Google image search through the local Python environment. Enter one or more keywords and select one or more images per slide.
+              </p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                The preview panel renders local slide images from the generated PPTX on Windows. This requires Microsoft PowerPoint to be installed.
               </p>
 
               {FIELDS.map(({ key, label, placeholder, secret, hint }) => (

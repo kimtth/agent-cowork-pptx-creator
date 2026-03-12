@@ -8,6 +8,8 @@ export interface SlideStory {
   storyContent: string;
 }
 
+export type DesignStyle = import('../design-styles').DesignStyle;
+
 export interface DesignBrief {
   objective: string;
   audience: string;
@@ -40,6 +42,16 @@ export type FrameworkType =
   | 'assertion-evidence'
   | 'exec-summary-first';
 
+export interface SlideSelectedImage {
+  id: string;
+  imageQuery: string | null;
+  imageUrl: string | null;
+  imagePath: string | null;
+  imageAttribution: string | null;
+  sourcePageUrl: string | null;
+  thumbnailUrl: string | null;
+}
+
 export interface SlideItem {
   id: string;
   number: number;
@@ -50,42 +62,13 @@ export interface SlideItem {
   notes: string;
   icon: string | null;
   imageQuery: string | null;
+  imageQueries: string[];
   imageUrl: string | null;
   imagePath: string | null;
   imageAttribution: string | null;
+  selectedImages: SlideSelectedImage[];
   code: string | null;
   accent: 'blue' | 'green' | 'purple' | 'teal' | 'orange';
-}
-
-export interface GeneratedSlidePreviewObject {
-  kind: 'text' | 'shape' | 'image';
-  shape?: string | null;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  text?: string | null;
-  fontSize?: number | null;
-  color?: string | null;
-  fillColor?: string | null;
-  lineColor?: string | null;
-  lineWidth?: number | null;
-  path?: string | null;
-  data?: string | null;
-  rotate?: number | null;
-  transparency?: number | null;
-  align?: string | null;
-  valign?: string | null;
-}
-
-export interface GeneratedSlidePreview {
-  id: string;
-  number: number;
-  title: string;
-  backgroundColor: string | null;
-  backgroundImageData: string | null;
-  notes: string | null;
-  objects: GeneratedSlidePreviewObject[];
 }
 
 export type SlidePhase = 'empty' | 'planning' | 'story' | 'generating' | 'ready';
@@ -95,10 +78,11 @@ export interface SlideWork {
   title: string;
   story: SlideStory | null;
   designBrief: DesignBrief | null;
+  designStyle: DesignStyle | null;
   framework: FrameworkType | null;
   slides: SlideItem[];
   pptxCode: string | null;
-  generatedPreviewSlides: GeneratedSlidePreview[] | null;
+  pptxBuildError: string | null;
   thinking: string | null;
   isStreaming: boolean;
 }
@@ -115,6 +99,7 @@ export interface ScenarioPayload {
     notes: string;
     icon?: string;
     imageQuery?: string;
+    imageQueries?: string[];
   }>;
   designBrief?: DesignBrief;
   framework?: FrameworkType;
@@ -130,4 +115,5 @@ export interface SlideUpdatePayload {
   notes: string;
   icon?: string;
   imageQuery?: string;
+  imageQueries?: string[];
 }

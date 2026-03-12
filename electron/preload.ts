@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     send(message: string, history: unknown[], workspace: unknown): void {
       ipcRenderer.send('chat:send', { message, history, workspace });
     },
+    cancel(): void {
+      ipcRenderer.send('chat:cancel');
+    },
     onStream(cb: (delta: { content?: string; thinking?: string }) => void) {
       const handler = (_: unknown, delta: { content?: string; thinking?: string }) => cb(delta);
       ipcRenderer.on('chat:stream', handler);
@@ -51,12 +54,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   pptx: {
     generate: (code: string, themeTokens: unknown, title: string) =>
       ipcRenderer.invoke('pptx:generate', code, themeTokens, title),
-    exportSlides: (slides: unknown[], themeTokens: unknown, title: string) =>
-      ipcRenderer.invoke('pptx:exportSlides', slides, themeTokens, title),
-    executeCode: (code: string, themeTokens: unknown) =>
-      ipcRenderer.invoke('pptx:executeCode', code, themeTokens),
-    inspectCode: (code: string, themeTokens: unknown) =>
-      ipcRenderer.invoke('pptx:inspectCode', code, themeTokens),
+    renderPreview: (code: string, themeTokens: unknown, title: string) =>
+      ipcRenderer.invoke('pptx:renderPreview', code, themeTokens, title),
   },
 
   fs: {
@@ -69,6 +68,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   images: {
+    searchForSlide: (slide: unknown) => ipcRenderer.invoke('images:searchForSlide', slide),
+    downloadForSlide: (slide: unknown, candidate: unknown) => ipcRenderer.invoke('images:downloadForSlide', slide, candidate),
     resolveForSlides: (slides: unknown[]) => ipcRenderer.invoke('images:resolveForSlides', slides),
   },
 

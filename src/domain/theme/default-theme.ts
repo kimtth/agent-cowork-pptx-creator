@@ -1,0 +1,39 @@
+import type { ThemeSlots, ThemeTokens } from '../entities/palette'
+
+export const DEFAULT_THEME_SLOTS: ThemeSlots = {
+  dk1: '1B1B1B',
+  lt1: 'FFFFFF',
+  dk2: '2D2D2D',
+  lt2: 'F5F5F5',
+  accent1: '0078D4',
+  accent2: '005A9E',
+  accent3: '107C10',
+  accent4: '5C2D91',
+  accent5: '008272',
+  accent6: 'D83B01',
+  hlink: '0078D4',
+  folHlink: '5C2D91',
+}
+
+export const DEFAULT_THEME_C: ThemeTokens['C'] = {
+  DARK: DEFAULT_THEME_SLOTS.dk1,
+  DARK2: DEFAULT_THEME_SLOTS.dk2,
+  LIGHT: DEFAULT_THEME_SLOTS.lt1,
+  LIGHT2: DEFAULT_THEME_SLOTS.lt2,
+  ACCENT1: DEFAULT_THEME_SLOTS.accent1,
+  ACCENT2: DEFAULT_THEME_SLOTS.accent2,
+  ACCENT3: DEFAULT_THEME_SLOTS.accent3,
+  ACCENT4: DEFAULT_THEME_SLOTS.accent4,
+  ACCENT5: DEFAULT_THEME_SLOTS.accent5,
+  ACCENT6: DEFAULT_THEME_SLOTS.accent6,
+  LINK: DEFAULT_THEME_SLOTS.hlink,
+  USED_LINK: DEFAULT_THEME_SLOTS.folHlink,
+  PRIMARY: DEFAULT_THEME_SLOTS.accent1,
+  SECONDARY: DEFAULT_THEME_SLOTS.accent2,
+  BG: DEFAULT_THEME_SLOTS.lt1,
+  TEXT: DEFAULT_THEME_SLOTS.dk1,
+  WHITE: DEFAULT_THEME_SLOTS.lt1,
+  BORDER: DEFAULT_THEME_SLOTS.lt2,
+}
+
+export const DEFAULT_THEME_SEEDS = [`#${DEFAULT_THEME_SLOTS.accent1}`, `#${DEFAULT_THEME_SLOTS.accent2}`]

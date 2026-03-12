@@ -4,14 +4,55 @@
 
 import { create } from 'zustand';
 import type {
+  DesignStyle,
   SlideItem,
+  SlideSelectedImage,
   SlideWork,
   ScenarioPayload,
   SlideUpdatePayload,
   FrameworkType,
   DesignBrief,
-  GeneratedSlidePreview,
 } from '../domain/entities/slide-work';
+
+function normalizeImageQueries(imageQuery: string | null | undefined, imageQueries?: string[]): string[] {
+  const explicit = (imageQueries ?? []).map((query) => query.trim()).filter(Boolean)
+  if (explicit.length > 0) return explicit
+  return String(imageQuery ?? '')
+    .split(/[\r\n,;]+/)
+    .map((query) => query.trim())
+    .filter(Boolean)
+}
+
+function toSelectedImage(image: {
+  id: string;
+  imageQuery: string | null;
+  imageUrl: string | null;
+  imagePath: string | null;
+  imageAttribution: string | null;
+  sourcePageUrl: string | null;
+  thumbnailUrl: string | null;
+}): SlideSelectedImage {
+  return {
+    id: image.id,
+    imageQuery: image.imageQuery,
+    imageUrl: image.imageUrl,
+    imagePath: image.imagePath,
+    imageAttribution: image.imageAttribution,
+    sourcePageUrl: image.sourcePageUrl,
+    thumbnailUrl: image.thumbnailUrl,
+  }
+}
+
+function syncPrimaryImage(slide: SlideItem, selectedImages: SlideSelectedImage[]): SlideItem {
+  const primary = selectedImages[0] ?? null
+  return {
+    ...slide,
+    selectedImages,
+    imageUrl: primary?.imageUrl ?? null,
+    imagePath: primary?.imagePath ?? null,
+    imageAttribution: primary?.imageAttribution ?? null,
+  }
+}
 
 function mapLayout(raw: string): SlideItem['layout'] {
   const valid = ['title', 'agenda', 'section', 'bullets', 'cards', 'stats', 'comparison', 'timeline', 'diagram', 'summary'] as const;
@@ -24,14 +65,16 @@ interface SlidesStore {
   work: SlideWork;
   applyScenario(payload: ScenarioPayload): void;
   applySlideUpdate(update: SlideUpdatePayload): void;
-  applyResolvedImages(images: Array<{ number: number; imageQuery: string | null; imageUrl: string | null; imagePath: string | null; imageAttribution: string | null }>): void;
+  applyResolvedImages(images: Array<{ id: string; number: number; imageQuery: string | null; imageUrl: string | null; imagePath: string | null; imageAttribution: string | null; sourcePageUrl: string | null; thumbnailUrl: string | null }>): void;
   setSlideImageQuery(number: number, imageQuery: string | null): void;
+  removeSlideImage(number: number, imageId: string): void;
+  setDesignStyle(style: DesignStyle | null): void;
   setFramework(fw: FrameworkType): void;
   setStreaming(v: boolean): void;
   setThinking(delta: string): void;
   appendChatContent(delta: string): void;
   setPptxCode(code: string): void;
-  setGeneratedPreviewSlides(slides: GeneratedSlidePreview[] | null): void;
+  setPptxBuildError(error: string | null): void;
   reset(): void;
   moveSlide(from: number, to: number): void;
   deleteSlide(number: number): void;
@@ -43,10 +86,11 @@ const initial: SlideWork = {
   title: '',
   story: null,
   designBrief: null,
+  designStyle: null,
   framework: null,
   slides: [],
   pptxCode: null,
-  generatedPreviewSlides: null,
+  pptxBuildError: null,
   thinking: null,
   isStreaming: false,
 };
@@ -65,9 +109,11 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
       notes: s.notes,
       icon: s.icon ?? null,
       imageQuery: s.imageQuery ?? null,
+      imageQueries: normalizeImageQueries(s.imageQuery ?? null, s.imageQueries),
       imageUrl: null,
       imagePath: null,
       imageAttribution: null,
+      selectedImages: [],
       code: null,
       accent: ACCENT_CYCLE[i % ACCENT_CYCLE.length],
     }));
@@ -78,7 +124,7 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
         title: payload.title,
         slides,
         pptxCode: null,
-        generatedPreviewSlides: null,
+        pptxBuildError: null,
         designBrief: (payload.designBrief as DesignBrief | undefined) ?? state.work.designBrief,
         framework: (payload.framework as FrameworkType | undefined) ?? state.work.framework,
       },
@@ -90,7 +136,7 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
       work: {
         ...state.work,
         pptxCode: null,
-        generatedPreviewSlides: null,
+        pptxBuildError: null,
         slides: state.work.slides.map((s) =>
           s.number === update.number
             ? {
@@ -102,9 +148,7 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
                 notes: update.notes,
                 icon: update.icon ?? s.icon,
                 imageQuery: update.imageQuery ?? s.imageQuery,
-                imageUrl: update.imageQuery && update.imageQuery !== s.imageQuery ? null : s.imageUrl,
-                imagePath: update.imageQuery && update.imageQuery !== s.imageQuery ? null : s.imagePath,
-                imageAttribution: update.imageQuery && update.imageQuery !== s.imageQuery ? null : s.imageAttribution,
+                imageQueries: normalizeImageQueries(update.imageQuery ?? s.imageQuery, update.imageQueries),
               }
             : s,
         ),
@@ -116,17 +160,21 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
     set((state) => ({
       work: {
         ...state.work,
+        pptxCode: null,
+        pptxBuildError: null,
         slides: state.work.slides.map((slide) => {
-          const resolved = images.find((item) => item.number === slide.number);
-          return resolved
-            ? {
-                ...slide,
-                imageQuery: resolved.imageQuery,
-                imageUrl: resolved.imageUrl,
-                imagePath: resolved.imagePath,
-                imageAttribution: resolved.imageAttribution,
-              }
-            : slide;
+          const resolved = images.filter((item) => item.number === slide.number)
+          if (resolved.length === 0) return slide
+
+          const existing = slide.selectedImages ?? []
+          const appended = [...existing]
+          for (const image of resolved) {
+            if (!appended.some((item) => item.id === image.id)) {
+              appended.push(toSelectedImage(image))
+            }
+          }
+
+          return syncPrimaryImage(slide, appended)
         }),
       },
     }));
@@ -136,17 +184,43 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
     set((state) => ({
       work: {
         ...state.work,
+        pptxCode: null,
+        pptxBuildError: null,
         slides: state.work.slides.map((slide) =>
           slide.number === number
             ? {
                 ...slide,
                 imageQuery,
-                imageUrl: imageQuery !== slide.imageQuery ? null : slide.imageUrl,
-                imagePath: imageQuery !== slide.imageQuery ? null : slide.imagePath,
-                imageAttribution: imageQuery !== slide.imageQuery ? null : slide.imageAttribution,
+                imageQueries: normalizeImageQueries(imageQuery),
               }
             : slide,
         ),
+      },
+    }));
+  },
+
+  removeSlideImage(number, imageId) {
+    set((state) => ({
+      work: {
+        ...state.work,
+        pptxCode: null,
+        pptxBuildError: null,
+        slides: state.work.slides.map((slide) => {
+          if (slide.number !== number) return slide
+          return syncPrimaryImage(slide, slide.selectedImages.filter((image) => image.id !== imageId))
+        }),
+      },
+    }))
+  },
+
+  setDesignStyle(style) {
+    set((state) => ({
+      work: {
+        ...state.work,
+        designStyle: style,
+        designBrief: state.work.designBrief
+          ? { ...state.work.designBrief, visualStyle: style ?? state.work.designBrief.visualStyle }
+          : state.work.designBrief,
       },
     }));
   },
@@ -172,11 +246,11 @@ export const useSlidesStore = create<SlidesStore>((set) => ({
   },
 
   setPptxCode(code) {
-    set((state) => ({ work: { ...state.work, pptxCode: code, phase: 'ready' } }));
+    set((state) => ({ work: { ...state.work, pptxCode: code, pptxBuildError: null, phase: 'ready' } }));
   },
 
-  setGeneratedPreviewSlides(slides) {
-    set((state) => ({ work: { ...state.work, generatedPreviewSlides: slides } }));
+  setPptxBuildError(error) {
+    set((state) => ({ work: { ...state.work, pptxBuildError: error } }));
   },
 
   reset() {

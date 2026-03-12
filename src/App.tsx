@@ -8,67 +8,64 @@ import { WorkspaceAreaButton } from './components/workspace/WorkspaceAreaButton.
 import { SettingsModal } from './components/settings/SettingsModal.tsx'
 import { useChatStore } from './stores/chat-store.ts'
 import { useSlidesStore } from './stores/slides-store.ts'
-import { usePaletteStore } from './stores/palette-store.ts'
-import { extractPptxCodeBlock } from './application/chat-use-case.ts'
+import { createAssistantMessage, extractPptxCodeBlock } from './application/chat-use-case.ts'
+import type { FrameworkType } from './domain/entities/slide-work'
 
 export default function App() {
-  const { appendContent, appendThinking, flushAssistantMessage } = useChatStore()
-  const { applyScenario, applySlideUpdate, applyResolvedImages, setFramework, setStreaming, setPptxCode, setGeneratedPreviewSlides } = useSlidesStore()
-  const { tokens } = usePaletteStore()
+  const messages = useChatStore((s) => s.messages)
+  const work = useSlidesStore((s) => s.work)
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   useEffect(() => {
     const api = window.electronAPI
 
-    async function resolveImagesForCurrentSlides(slides: Array<{ number: number; title: string; keyMessage: string; bullets: string[]; imageQuery?: string | null }>) {
-      const resolved = await api.images.resolveForSlides(slides)
-      if (resolved.length > 0) applyResolvedImages(resolved)
-    }
-
     const unsubs = [
       api.chat.onStream((delta) => {
-        if (delta.content) appendContent(delta.content)
-        if (delta.thinking) appendThinking(delta.thinking)
+        if (delta.content) useChatStore.getState().appendContent(delta.content)
+        if (delta.thinking) useChatStore.getState().appendThinking(delta.thinking)
       }),
       api.chat.onScenario((payload) => {
-        applyScenario(payload)
-        void resolveImagesForCurrentSlides(payload.slides)
+        useSlidesStore.getState().applyScenario(payload)
       }),
       api.chat.onSlideUpdate((slide) => {
-        applySlideUpdate(slide)
-        void resolveImagesForCurrentSlides([{ number: slide.number, title: slide.title, keyMessage: slide.keyMessage, bullets: slide.bullets, imageQuery: slide.imageQuery ?? null }])
+        useSlidesStore.getState().applySlideUpdate(slide)
       }),
       api.chat.onFrameworkSuggested((payload) => {
-        setFramework(payload.primary as Parameters<typeof setFramework>[0])
+        useSlidesStore.getState().setFramework(payload.primary as FrameworkType)
       }),
       api.chat.onDone(() => {
-        const code = extractPptxCodeBlock(useChatStore.getState().pendingContent)
-        flushAssistantMessage()
-        setStreaming(false)
+        const pendingContent = useChatStore.getState().pendingContent
+        // Flush immediately so the message is visible, then defer regex to keep UI responsive
+        useChatStore.getState().flushAssistantMessage()
+        useSlidesStore.getState().setStreaming(false)
 
-        if (!code) {
-          setGeneratedPreviewSlides(null)
-          return
-        }
+        requestAnimationFrame(() => {
+          const hasCodeBlock = /```(?:python|py)?\s*[\s\S]*?```/i.test(pendingContent)
+          const code = extractPptxCodeBlock(pendingContent)
 
-        setPptxCode(code)
-        void api.pptx.inspectCode(code, tokens)
-          .then((generatedSlides) => {
-            setGeneratedPreviewSlides(generatedSlides)
-          })
-          .catch(() => {
-            setGeneratedPreviewSlides(null)
-          })
+          if (code) {
+            useSlidesStore.getState().setPptxCode(code)
+            useSlidesStore.getState().setPptxBuildError(null)
+          } else {
+            const message = hasCodeBlock
+              ? 'The model returned code, but it did not match a supported python-pptx script.'
+              : null
+            useSlidesStore.getState().setPptxBuildError(message)
+            if (message) {
+              useChatStore.getState().addMessage(createAssistantMessage(message))
+            }
+          }
+        })
       }),
       api.chat.onError((msg) => {
-        appendContent(`\n\n⚠️ ${msg}`)
-        flushAssistantMessage()
-        setStreaming(false)
+        useChatStore.getState().appendContent(`\n\n⚠️ ${msg}`)
+        useChatStore.getState().flushAssistantMessage()
+        useSlidesStore.getState().setStreaming(false)
       }),
     ]
 
     return () => unsubs.forEach((u) => u())
-  }, [appendContent, appendThinking, flushAssistantMessage, applyScenario, applySlideUpdate, applyResolvedImages, setFramework, setStreaming, setPptxCode, setGeneratedPreviewSlides, tokens])
+  }, [])
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden" style={{ background: 'var(--panel-bg)' }}>

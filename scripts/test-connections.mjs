@@ -13,6 +13,19 @@ const AZURE_TEST_MAX_TOKENS = 128;
 const AZURE_SCOPES = [
   'https://cognitiveservices.azure.com/.default',
 ];
+const APP_NAME = 'pptx-slide-agent';
+
+function buildResult(name, ok, message, skipped = false) {
+  return skipped ? { name, ok, message, skipped } : { name, ok, message };
+}
+
+function formatError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAuthError(status) {
+  return status === 401 || status === 403;
+}
 
 function normalizeUrl(value) {
   return String(value).replace(/\/$/, '');
@@ -27,7 +40,7 @@ function normalizeGitHubToken(value) {
 }
 
 async function readSettingsFile() {
-  const settingsPath = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'pptx-slide-agent', 'settings.json');
+  const settingsPath = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), APP_NAME, 'settings.json');
   try {
     const raw = await fs.readFile(settingsPath, 'utf8');
     return JSON.parse(raw);
@@ -118,7 +131,7 @@ async function postAzureJson(url, headers, body) {
 async function testCopilot(settings) {
   const token = normalizeGitHubToken(getValue(settings, 'GITHUB_TOKEN'));
   if (!token) {
-    return { name: 'Copilot', ok: false, skipped: true, message: 'GITHUB_TOKEN is not set.' };
+    return buildResult('Copilot', false, 'GITHUB_TOKEN is not set.', true);
   }
 
   const cliPath = getCopilotCliPath();
@@ -147,7 +160,7 @@ async function testCopilot(settings) {
     throw new Error(`Unexpected Copilot reply: ${JSON.stringify(reply)}`);
   }
 
-  return { name: 'Copilot', ok: true, message: 'Authenticated and returned OK.' };
+  return buildResult('Copilot', true, 'Authenticated and returned OK.');
 }
 
 async function getAzureAuthCandidates(settings) {
@@ -180,10 +193,10 @@ async function testAzure(settings) {
   const provider = getValue(settings, 'MODEL_PROVIDER');
 
   if (!endpoint) {
-    return { name: 'Azure', ok: false, skipped: true, message: 'AZURE_OPENAI_ENDPOINT is not set.' };
+    return buildResult('Azure', false, 'AZURE_OPENAI_ENDPOINT is not set.', true);
   }
   if (!model) {
-    return { name: 'Azure', ok: false, skipped: true, message: 'MODEL_NAME is not set.' };
+    return buildResult('Azure', false, 'MODEL_NAME is not set.', true);
   }
 
   const authCandidates = await getAzureAuthCandidates(settings);
@@ -207,14 +220,14 @@ async function testAzure(settings) {
 
     if (!responsesResult.response.ok) {
       lastError = `Azure HTTP ${responsesResult.response.status} from ${baseUrl} via ${auth.label}: ${responsesResult.rawText.slice(0, 500)}`;
-      if (responsesResult.response.status === 401 || responsesResult.response.status === 403) continue;
+      if (isAuthError(responsesResult.response.status)) continue;
       throw new Error(lastError);
     }
 
     const responsesReply = extractAzureOutputText(responsesResult.payload);
     if (responsesReply === 'OK') {
       const providerSuffix = provider ? ` (MODEL_PROVIDER=${provider})` : '';
-      return { name: 'Azure', ok: true, message: `Connected to ${baseUrl} with model ${model} via /responses and returned OK via ${auth.label}${providerSuffix}.` };
+      return buildResult('Azure', true, `Connected to ${baseUrl} with model ${model} via /responses and returned OK via ${auth.label}${providerSuffix}.`);
     }
 
     const chatUrl = `${baseUrl}/chat/completions`;
@@ -226,14 +239,14 @@ async function testAzure(settings) {
 
     if (!chatResult.response.ok) {
       lastError = `Azure /responses returned ${JSON.stringify(responsesReply)} with payload ${summarizePayload(responsesResult.payload)}. /chat/completions then failed with HTTP ${chatResult.response.status}: ${chatResult.rawText.slice(0, 500)}`;
-      if (chatResult.response.status === 401 || chatResult.response.status === 403) continue;
+      if (isAuthError(chatResult.response.status)) continue;
       throw new Error(lastError);
     }
 
     const chatReply = extractChatCompletionText(chatResult.payload);
     if (chatReply === 'OK') {
       const providerSuffix = provider ? ` (MODEL_PROVIDER=${provider})` : '';
-      return { name: 'Azure', ok: true, message: `Connected to ${baseUrl} with model ${model} via /chat/completions after empty /responses output via ${auth.label}${providerSuffix}.` };
+      return buildResult('Azure', true, `Connected to ${baseUrl} with model ${model} via /chat/completions after empty /responses output via ${auth.label}${providerSuffix}.`);
     }
 
     throw new Error(
@@ -257,7 +270,7 @@ async function main() {
     try {
       results.push(await testCopilot(settings));
     } catch (error) {
-      results.push({ name: 'Copilot', ok: false, message: error instanceof Error ? error.message : String(error) });
+      results.push(buildResult('Copilot', false, formatError(error)));
     }
   }
 
@@ -265,7 +278,7 @@ async function main() {
     try {
       results.push(await testAzure(settings));
     } catch (error) {
-      results.push({ name: 'Azure', ok: false, message: error instanceof Error ? error.message : String(error) });
+      results.push(buildResult('Azure', false, formatError(error)));
     }
   }
 

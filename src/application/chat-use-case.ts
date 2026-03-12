@@ -3,10 +3,11 @@
  * Business logic for chat history, prompt formatting, and workspace serialization.
  */
 
-import type { SlideItem, DesignBrief, FrameworkType } from '../domain/entities/slide-work';
+import type { SlideItem, DesignBrief, DesignStyle, FrameworkType } from '../domain/entities/slide-work';
 import type { ThemeTokens } from '../domain/entities/palette';
 import type { DataFile, ScrapeResult } from '../domain/ports/ipc';
 import type { IconifyCollectionId } from '../domain/icons/iconify';
+import type { WorkflowConfig } from '../domain/workflows/workflow-config';
 
 export interface ChatMessage {
   id: string;
@@ -20,8 +21,10 @@ export interface WorkspaceContext {
   title: string;
   slides: SlideItem[];
   designBrief: DesignBrief | null;
+  designStyle: DesignStyle | null;
   framework: FrameworkType | null;
   theme: ThemeTokens | null;
+  workflow: WorkflowConfig | null;
   dataSources: DataFile[];
   urlSources: Array<{ url: string; status: string; result?: ScrapeResult }>;
   iconProvider: 'iconify';
@@ -42,6 +45,17 @@ export function historyToIpc(messages: ChatMessage[]): Array<{ role: 'user' | 'a
 }
 
 export function extractPptxCodeBlock(content: string): string | null {
-  const match = content.match(/```(?:javascript|js)?\s*([\s\S]*?)```/i)
-  return match?.[1]?.trim() || null
+  const blocks = [...content.matchAll(/```(?:(python|py))?\s*([\s\S]*?)```/ig)]
+  if (blocks.length === 0) return null
+
+  const preferred = blocks.find((match) => {
+    const language = (match[1] ?? '').toLowerCase()
+    return language === 'python' || language === 'py'
+  }) ?? blocks.find((match) => looksLikePythonPptxCode(match[2] ?? ''))
+
+  return preferred?.[2]?.trim() || null
+}
+
+function looksLikePythonPptxCode(code: string): boolean {
+  return /from\s+pptx\s+import|import\s+pptx|Presentation\(|def\s+build_presentation\s*\(/i.test(code)
 }

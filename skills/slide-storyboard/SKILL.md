@@ -1,5 +1,5 @@
 ---
-name: create-slide-story
+name: slide-storyboard
 description: Analyzes user requests and provided materials to create a presentation slide story (structure plan). Uses the set_scenario tool to output directly to the workspace panel. Also calls suggest_framework to recommend the best consulting framework before building the story.
 ---
 

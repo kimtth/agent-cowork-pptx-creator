@@ -1,0 +1,97 @@
+import { CopilotClient, approveAll } from '@github/copilot-sdk';
+import type { SessionConfig } from '@github/copilot-sdk';
+import { createRequire } from 'module';
+import path from 'path';
+import { app } from 'electron';
+
+let clientInstance: CopilotClient | null = null;
+const AZURE_OPENAI_SCOPE = 'https://cognitiveservices.azure.com/.default';
+const require = createRequire(import.meta.url);
+const WORKFLOW_INSTRUCTIONS_DIR = path.join(app.getAppPath(), 'workflows');
+
+export function resetCopilotClient(): void {
+  clientInstance = null;
+}
+
+export async function getCopilotClient(): Promise<CopilotClient> {
+  if (!clientInstance) {
+    const token = normalizeGitHubToken(process.env.GITHUB_TOKEN);
+    const cliPath = resolveCopilotCliPath();
+    clientInstance = new CopilotClient({
+      cliPath,
+      ...(token ? { githubToken: token } : {}),
+      ...(token ? { useLoggedInUser: false } : {}),
+    });
+  }
+  return clientInstance;
+}
+
+export async function getSessionOptions(opts?: {
+  streaming?: boolean;
+  model?: string;
+}): Promise<Partial<SessionConfig>> {
+  const provider = process.env.MODEL_PROVIDER?.trim().toLowerCase();
+  const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.trim();
+  const modelName = opts?.model ?? process.env.MODEL_NAME;
+  const streaming = opts?.streaming ?? false;
+  const useAzureOpenAI = Boolean(endpoint);
+  const useGitHubModels = !useAzureOpenAI && (!provider || provider === 'openai' || provider === 'github');
+
+  if (!provider && !modelName && !useAzureOpenAI) return { streaming };
+  if (useGitHubModels) {
+    return { ...(modelName ? { model: modelName } : {}), streaming };
+  }
+
+  if (useAzureOpenAI) {
+    if (!endpoint || !modelName) {
+      throw new Error('AZURE_OPENAI_ENDPOINT and MODEL_NAME are required to use Azure OpenAI / Foundry model serving');
+    }
+
+    const apiKey = process.env.AZURE_OPENAI_API_KEY;
+    let auth: { apiKey?: string; bearerToken?: string };
+    if (apiKey && apiKey.trim()) {
+      auth = { apiKey: apiKey.trim() };
+    } else {
+      const { DefaultAzureCredential } = await import('@azure/identity');
+      const tenantId = process.env.AZURE_TENANT_ID?.trim() || undefined;
+      const credential = new DefaultAzureCredential(tenantId ? { tenantId } : undefined);
+      const tokenResult = await credential.getToken(AZURE_OPENAI_SCOPE);
+      if (!tokenResult) throw new Error('Failed to acquire Azure bearer token. Set AZURE_OPENAI_API_KEY or run "az login".');
+      auth = { bearerToken: tokenResult.token };
+    }
+
+    return {
+      model: modelName,
+      streaming,
+      provider: {
+        type: 'openai',
+        baseUrl: endpoint.replace(/\/$/, ''),
+        ...auth,
+        wireApi: 'responses',
+      },
+    };
+  }
+
+  throw new Error(`Unknown MODEL_PROVIDER: ${provider}`);
+}
+
+export function resolveWorkflowInstructionsDir(): string {
+  return WORKFLOW_INSTRUCTIONS_DIR;
+}
+
+export function resolveWorkflowInstructionPath(fileName: string): string {
+  return path.join(WORKFLOW_INSTRUCTIONS_DIR, fileName);
+}
+
+export function normalizeGitHubToken(value: string | undefined): string | undefined {
+  const raw = (value ?? '').trim();
+  if (!raw) return undefined;
+  const noBearer = raw.replace(/^Bearer\s+/i, '');
+  const unquoted = noBearer.replace(/^['\"](.*)['\"]$/, '$1').trim();
+  return unquoted || undefined;
+}
+
+export function resolveCopilotCliPath(): string {
+  const nativePkg = `@github/copilot-${process.platform}-${process.arch}`;
+  return require.resolve(nativePkg);
+}

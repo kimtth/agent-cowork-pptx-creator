@@ -6,9 +6,8 @@ import { create } from 'zustand';
 import type { PaletteColor, ThemeSlots, ThemeTokens } from '../domain/entities/palette';
 import { buildThemeTokens } from '../application/palette-use-case';
 import { DEFAULT_ICONIFY_COLLECTION } from '../domain/icons/iconify';
+import { DEFAULT_THEME_SEEDS } from '../domain/theme/default-theme';
 import type { IconifyCollectionId } from '../domain/icons/iconify';
-
-const DEFAULT_SEEDS = ['#0078D4', '#5C2D91'];
 
 interface PaletteStore {
   seeds: string[];
@@ -30,7 +29,7 @@ interface PaletteStore {
 }
 
 export const usePaletteStore = create<PaletteStore>((set, get) => ({
-  seeds: DEFAULT_SEEDS,
+  seeds: DEFAULT_THEME_SEEDS,
   colors: [],
   slots: null,
   tokens: null,

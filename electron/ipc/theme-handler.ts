@@ -9,10 +9,11 @@ import { ipcMain, dialog } from 'electron';
 import fs from 'fs/promises';
 import JSZip from 'jszip';
 import { CopilotClient, approveAll } from '@github/copilot-sdk';
-import { normalizeGitHubToken, resolveCopilotCliPath } from './copilot-client-utils.ts';
+import { normalizeGitHubToken, resolveCopilotCliPath } from './copilot-runtime.ts';
 import { onSettingsSaved } from './settings-handler.ts';
 import type { SessionConfig } from '@github/copilot-sdk';
 import type { PaletteColor, ThemeSlots, ThemeTokens } from '../../src/domain/entities/palette';
+import { DEFAULT_THEME_SLOTS } from '../../src/domain/theme/default-theme';
 
 // ---------------------------------------------------------------------------
 // Color utilities (ported from oppadu)
@@ -57,13 +58,7 @@ function hexToHsl(hex: string): { h: number; s: number; l: number } {
 
 export function autoAssignThemeColors(colors: PaletteColor[]): ThemeSlots {
   if (colors.length === 0) {
-    // Return a neutral fallback
-    return {
-      dk1: '1B1B1B', lt1: 'FFFFFF', dk2: '2D2D2D', lt2: 'F5F5F5',
-      accent1: '0078D4', accent2: '005A9E', accent3: '107C10',
-      accent4: '5C2D91', accent5: '008272', accent6: 'D83B01',
-      hlink: '0078D4', folHlink: '5C2D91',
-    };
+    return DEFAULT_THEME_SLOTS;
   }
 
   const sorted = [...colors].sort(
@@ -71,12 +66,12 @@ export function autoAssignThemeColors(colors: PaletteColor[]): ThemeSlots {
   );
 
   // Darkest 2 → dk1, dk2 (in luminance-ascending order, so index 0 is darkest)
-  const dk1 = sorted[0]?.hex.replace('#', '') ?? '1B1B1B';
-  const dk2 = sorted[1]?.hex.replace('#', '') ?? '2D2D2D';
+  const dk1 = sorted[0]?.hex.replace('#', '') ?? DEFAULT_THEME_SLOTS.dk1;
+  const dk2 = sorted[1]?.hex.replace('#', '') ?? DEFAULT_THEME_SLOTS.dk2;
 
   // Lightest 2 → lt1, lt2
-  const lt1 = sorted[sorted.length - 1]?.hex.replace('#', '') ?? 'FFFFFF';
-  const lt2 = sorted[sorted.length - 2]?.hex.replace('#', '') ?? 'F5F5F5';
+  const lt1 = sorted[sorted.length - 1]?.hex.replace('#', '') ?? DEFAULT_THEME_SLOTS.lt1;
+  const lt2 = sorted[sorted.length - 2]?.hex.replace('#', '') ?? DEFAULT_THEME_SLOTS.lt2;
 
   // Middle colors sorted by saturation desc → take top 8 → sort by hue → use 6
   const middle = sorted.slice(2, sorted.length - 2);
@@ -90,7 +85,7 @@ export function autoAssignThemeColors(colors: PaletteColor[]): ThemeSlots {
   const count = byHue.length;
   const accents = Array.from({ length: 6 }, (_, i) => {
     const idx = count <= 6 ? i : Math.round((i / 5) * (count - 1));
-    return byHue[Math.min(idx, count - 1)]?.hex.replace('#', '') ?? '0078D4';
+    return byHue[Math.min(idx, count - 1)]?.hex.replace('#', '') ?? DEFAULT_THEME_SLOTS.accent1;
   });
 
   // hlink: blue range (hue 180–260, saturation > 0.15)
@@ -113,35 +108,6 @@ export function autoAssignThemeColors(colors: PaletteColor[]): ThemeSlots {
     accent4: accents[3], accent5: accents[4], accent6: accents[5],
     hlink, folHlink,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Build ThemeTokens from slots + colors
-// ---------------------------------------------------------------------------
-
-export function buildThemeTokens(name: string, slots: ThemeSlots, colors: PaletteColor[]): ThemeTokens {
-  const C: ThemeTokens['C'] = {
-    DARK: slots.dk1,
-    DARK2: slots.dk2,
-    LIGHT: slots.lt1,
-    LIGHT2: slots.lt2,
-    ACCENT1: slots.accent1,
-    ACCENT2: slots.accent2,
-    ACCENT3: slots.accent3,
-    ACCENT4: slots.accent4,
-    ACCENT5: slots.accent5,
-    ACCENT6: slots.accent6,
-    LINK: slots.hlink,
-    USED_LINK: slots.folHlink,
-    // Semantic aliases
-    PRIMARY: slots.accent1,
-    SECONDARY: slots.accent2,
-    BG: slots.lt1,
-    TEXT: slots.dk1,
-    WHITE: slots.lt1,
-    BORDER: slots.lt2,
-  };
-  return { name, slots, colors, C };
 }
 
 // ---------------------------------------------------------------------------
@@ -373,9 +339,10 @@ async function getPaletteSessionOptions(): Promise<Partial<SessionConfig>> {
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.trim();
   const modelName = process.env.MODEL_NAME;
   const useAzureOpenAI = Boolean(endpoint);
+  const useGitHubModels = !useAzureOpenAI && (!provider || provider === 'openai' || provider === 'github');
 
   if (!provider && !modelName && !useAzureOpenAI) return { streaming: false };
-  if (!useAzureOpenAI && (!provider || provider === 'openai')) {
+  if (useGitHubModels) {
     return { ...(modelName ? { model: modelName } : {}), streaming: false };
   }
 

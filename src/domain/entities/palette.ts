@@ -23,13 +23,13 @@ export interface ThemeSlots {
   folHlink: string;
 }
 
-/** Full theme with colors usable by PptxGenJS (no '#' prefix) */
+/** Full theme with colors usable by PowerPoint theme and PPTX generation (no '#' prefix) */
 export interface ThemeTokens {
   name: string;
   slots: ThemeSlots;
   /** Flat map name→hex for dropdown rendering */
   colors: PaletteColor[];
-  /** PptxGenJS-compatible C constants (dk1→DARK, lt1→WHITE, accent1→ACCENT1, etc.) */
+  /** Theme constants exposed to generated PPTX code (dk1→DARK, lt1→WHITE, accent1→ACCENT1, etc.) */
   C: {
     DARK: string;
     DARK2: string;

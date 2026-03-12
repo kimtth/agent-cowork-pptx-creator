@@ -6,8 +6,10 @@
 process.env.NODE_NO_WARNINGS = '1';
 
 import { app, BrowserWindow, shell } from 'electron';
+import { net, protocol } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { pathToFileURL } from 'url';
 import { registerChatHandlers } from './ipc/chat-handler.ts';
 import { registerPptxHandlers } from './ipc/pptx-handler.ts';
 import { registerThemeHandlers } from './ipc/theme-handler.ts';
@@ -20,6 +22,17 @@ import { registerProjectHandlers } from './ipc/project-handler.ts';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
+
+function registerLocalImageProtocol(): void {
+  protocol.handle('pptx-local', async (request) => {
+    const url = new URL(request.url)
+    const filePath = url.searchParams.get('path')
+    if (!filePath) {
+      return new Response('Missing path', { status: 400 })
+    }
+    return net.fetch(pathToFileURL(filePath).toString())
+  })
+}
 
 process.on('unhandledRejection', (reason) => {
   console.error('[main] Unhandled promise rejection', reason);
@@ -71,6 +84,7 @@ app.whenReady()
   .then(async () => {
     // Apply persisted settings to process.env before creating handlers
     await applySettingsToEnv();
+    registerLocalImageProtocol();
 
     // Register all IPC handlers (pass mainWindow getter for streaming)
     const getWindow = () => mainWindow;

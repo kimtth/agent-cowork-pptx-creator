@@ -9,7 +9,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "setup:markitdown": "node scripts/setup-markitdown.mjs",
+    "setup:python-env": "node scripts/setup-python.mjs",
     "test:connections": "node scripts/test-connections.mjs"
   },
   "dependencies": {
@@ -24,7 +24,6 @@
     "jszip": "^3.10.1",
     "lucide-react": "^0.577.0",
     "mammoth": "^1.11.0",
-    "pptxgenjs": "^4.0.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-markdown": "^10.1.0",

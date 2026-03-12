@@ -1,0 +1,13 @@
+[project]
+name = "pptx-slide-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "icrawler>=0.6.10",
+    "markitdown[docx]>=0.1.5",
+    "pillow>=12.1.1",
+    "pywin32>=311; sys_platform == 'win32'",
+    "python-pptx>=1.0.2",
+]

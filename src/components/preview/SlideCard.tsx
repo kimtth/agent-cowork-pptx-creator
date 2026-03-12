@@ -7,8 +7,10 @@ import type { CSSProperties } from 'react'
 import { Icon } from '@iconify/react'
 import type { SlideItem } from '../../domain/entities/slide-work'
 import type { ThemeTokens } from '../../domain/entities/palette'
+import { DEFAULT_THEME_C } from '../../domain/theme/default-theme'
 import { getSlideLayoutSpec, getVisibleBullets, splitComparisonBullets, toPreviewPx, type RectSpec, type SlideLayoutSpec } from '../../domain/layout/slide-layout-spec'
 import { normalizeIconName } from '../../domain/icons/iconify'
+import { toLocalImageUrl } from '../../application/local-image-url.ts'
 
 interface Props {
   slide: SlideItem
@@ -18,21 +20,13 @@ interface Props {
   selected?: boolean
 }
 
-const DEFAULT_C = {
-  DARK: '1B1B1B', LIGHT: 'FFFFFF', LIGHT2: 'F5F5F5',
-  ACCENT1: '0078D4', ACCENT2: '5C2D91', ACCENT3: '107C10',
-  ACCENT4: '008272', ACCENT5: 'D83B01', ACCENT6: '004B1C',
-  PRIMARY: '0078D4', SECONDARY: '5C2D91', BG: 'FFFFFF', TEXT: '1B1B1B',
-  BORDER: 'E1E1E1',
-}
-
 const FS = (base: number, scale: number) => base * scale
 
 function hex(c: string) {
   return `#${c.replace('#', '')}`
 }
 
-function getAccentSequence(C: typeof DEFAULT_C | NonNullable<ThemeTokens>['C']) {
+function getAccentSequence(C: ThemeTokens['C']) {
   return [C.ACCENT1, C.ACCENT2, C.ACCENT3, C.ACCENT4, C.ACCENT5, C.ACCENT6].map(hex)
 }
 
@@ -76,11 +70,18 @@ function DefaultHeader({ slide, spec, scale, color, primary }: { slide: SlideIte
 
 function HeroIcon({ spec, slide, scale, border, fill }: { spec: SlideLayoutSpec; slide: SlideItem; scale: number; border: string; fill: string }) {
   if (!spec.iconRect) return null
-  if (slide.imagePath) {
-    const src = 'file:///' + slide.imagePath.replace(/\\/g, '/')
+  const selectedImages = slide.selectedImages ?? []
+  const primaryImagePath = slide.imagePath ?? selectedImages[0]?.imagePath ?? null
+  if (primaryImagePath) {
+    const src = toLocalImageUrl(primaryImagePath)
     return (
       <div style={{ ...rectStyle(spec.iconRect, scale), border: `${1 * scale}px solid ${border}`, background: fill, borderRadius: 8 * scale, overflow: 'hidden' }}>
         <img src={src} alt="" draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+        {selectedImages.length > 1 ? (
+          <div style={{ position: 'absolute', right: 6 * scale, bottom: 6 * scale, padding: `${2 * scale}px ${5 * scale}px`, borderRadius: 999 * scale, background: 'rgba(15, 23, 42, 0.78)', color: '#fff', fontSize: FS(6, scale), fontFamily: 'Segoe UI, system-ui', fontWeight: 700 }}>
+            +{selectedImages.length - 1}
+          </div>
+        ) : null}
       </div>
     )
   }
@@ -189,7 +190,7 @@ function StatsSlide({ slide, spec, scale, color, primary, secondary, muted, acce
         const x = stats.startX + index * (stats.boxW + stats.gapX)
         const tone = accents[index % accents.length]
         return (
-          <div key={index} style={{ ...rectStyle({ x, y: stats.startY, w: stats.boxW, h: stats.boxH }, scale), textAlign: 'center', background: hex(DEFAULT_C.LIGHT2), borderRadius: 6 * scale, border: `${1.5 * scale}px solid ${tone}`, overflow: 'hidden' }}>
+          <div key={index} style={{ ...rectStyle({ x, y: stats.startY, w: stats.boxW, h: stats.boxH }, scale), textAlign: 'center', background: muted, borderRadius: 6 * scale, border: `${1.5 * scale}px solid ${tone}`, overflow: 'hidden' }}>
             <div style={{ marginTop: 10 * scale, fontSize: FS(18, scale), fontWeight: 800, color: tone, lineHeight: 1 }}>{value.trim()}</div>
             <div style={{ marginTop: 4 * scale, padding: `0 ${6 * scale}px`, fontSize: FS(7, scale), color, fontFamily: 'Segoe UI, system-ui' }}>{(rest.join(':') || item).trim()}</div>
           </div>
@@ -263,7 +264,7 @@ function SummarySlide({ slide, spec, scale, color, primary, secondary }: { slide
 }
 
 export function SlideCard({ slide, theme, scale = 1, onClick, selected }: Props) {
-  const C = theme ? theme.C : DEFAULT_C
+  const C = theme?.C ?? DEFAULT_THEME_C
   const accents = getAccentSequence(C)
   const accentIndex = getSlideAccentIndex(slide)
   const bg = hex(C.LIGHT)

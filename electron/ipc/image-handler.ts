@@ -1,38 +1,26 @@
 import { ipcMain } from 'electron'
+import { execFile } from 'child_process'
 import fs from 'fs/promises'
 import path from 'path'
 import { createHash } from 'crypto'
+import { promisify } from 'util'
 import { load } from 'cheerio'
 import { readWorkspaceDir } from './workspace-utils.ts'
+import { ensurePythonModule, pythonSetupHint, resolvePythonExecutable } from './python-runtime.ts'
+import type { ImageSearchCandidate, ImageSearchRequest, ImageSearchResult, ResolvedSlideImage } from '../../src/domain/ports/ipc'
 
-interface SlideImageRequest {
-  number: number
-  title: string
-  keyMessage: string
-  bullets: string[]
-  imageQuery?: string | null
-}
+const execFileAsync = promisify(execFile)
 
-interface SlideImageResult {
-  number: number
-  imageQuery: string | null
-  imageUrl: string | null
-  imagePath: string | null
-  imageAttribution: string | null
-}
-
-interface GoogleImageMatch {
-  imageUrl?: string | null
-  sourcePageUrl?: string | null
-  inlineImageDataUrl?: string | null
-}
-
-interface OpenverseImage {
-  url?: string
-  thumbnail?: string
-  title?: string
-  attribution?: string
-  foreign_landing_url?: string
+interface PythonImageSearchResponse {
+  query?: string
+  candidates?: Array<{
+    searchQuery?: string | null
+    imageUrl?: string | null
+    thumbnailUrl?: string | null
+    sourcePageUrl?: string | null
+    title?: string | null
+    attribution?: string | null
+  }>
 }
 
 function slugify(value: string): string {
@@ -47,13 +35,35 @@ function hashValue(value: string): string {
   return createHash('sha1').update(value).digest('hex').slice(0, 10)
 }
 
-function deriveQuery(slide: SlideImageRequest): string {
+function candidateId(...parts: Array<string | null | undefined>): string {
+  return hashValue(parts.filter(Boolean).join('|'))
+}
+
+function deriveQuery(slide: ImageSearchRequest): string {
   const explicit = slide.imageQuery?.trim()
   if (explicit) return explicit
   return [slide.title, slide.keyMessage, ...slide.bullets.slice(0, 2)]
     .filter(Boolean)
     .join(' ')
     .trim()
+}
+
+function deriveQueries(slide: ImageSearchRequest): string[] {
+  const explicit = (slide.imageQueries ?? [])
+    .map((query) => query.trim())
+    .filter(Boolean)
+
+  if (explicit.length > 0) return explicit
+
+  const fromText = String(slide.imageQuery ?? '')
+    .split(/[\r\n,;]+/)
+    .map((query) => query.trim())
+    .filter(Boolean)
+
+  if (fromText.length > 0) return fromText
+
+  const fallback = deriveQuery(slide)
+  return fallback ? [fallback] : []
 }
 
 function isHttpUrl(value: string): boolean {
@@ -97,26 +107,15 @@ function normalizeAbsoluteUrl(candidate: string | undefined | null, baseUrl: str
   }
 }
 
-function decodeGoogleHref(href: string): { imageUrl?: string | null; pageUrl?: string | null } {
+function deriveCandidateTitle(candidate: string | null | undefined): string | null {
+  if (!candidate) return null
   try {
-    if (href.startsWith('/imgres?')) {
-      const url = new URL(`https://www.google.com${href}`)
-      return {
-        imageUrl: url.searchParams.get('imgurl'),
-        pageUrl: url.searchParams.get('imgrefurl'),
-      }
-    }
-    if (href.startsWith('/url?')) {
-      const url = new URL(`https://www.google.com${href}`)
-      return { pageUrl: url.searchParams.get('q') }
-    }
-    if (isHttpUrl(href) && !/https?:\/\/(www\.)?google\./i.test(href)) {
-      return { pageUrl: href }
-    }
+    const url = new URL(candidate)
+    const lastSegment = url.pathname.split('/').filter(Boolean).pop()
+    return decodeURIComponent(lastSegment || url.hostname)
   } catch {
-    return {}
+    return candidate.slice(0, 80)
   }
-  return {}
 }
 
 async function ensureImagesDir(): Promise<string> {
@@ -126,59 +125,37 @@ async function ensureImagesDir(): Promise<string> {
   return imagesDir
 }
 
-async function searchGoogleImages(query: string): Promise<GoogleImageMatch | null> {
-  const { fetch } = await import('undici')
-  const url = new URL('https://www.google.com/search')
-  url.searchParams.set('q', query)
-  url.searchParams.set('tbm', 'isch')
-  url.searchParams.set('hl', 'en')
-  url.searchParams.set('safe', 'active')
+async function searchGoogleImages(query: string): Promise<ImageSearchCandidate[]> {
+  const python = await resolvePythonExecutable()
+  await ensurePythonModule(python, 'icrawler', `Install the Python dependencies first. ${pythonSetupHint()}`)
 
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(15000),
-    headers: {
-      'User-Agent': 'PPTX Slide Agent/1.0 (image lookup)',
-      'Accept-Language': 'en-US,en;q=0.9',
-    },
-  })
-  if (!res.ok) return null
-  const html = await res.text()
-  const $ = load(html)
-
-  let inlineImageDataUrl: string | null = null
-  $('img').each((_, el) => {
-    const src = $(el).attr('src')
-    if (!inlineImageDataUrl && src?.startsWith('data:image/')) {
-      inlineImageDataUrl = src
-    }
-  })
-
-  for (const anchor of $('a[href]').toArray()) {
-    const href = $(anchor).attr('href')
-    if (!href) continue
-    const decoded = decodeGoogleHref(href)
-    if (decoded.imageUrl || decoded.pageUrl) {
-      return {
-        imageUrl: decoded.imageUrl ?? null,
-        sourcePageUrl: decoded.pageUrl ?? null,
-        inlineImageDataUrl,
-      }
-    }
+  const scriptPath = path.join(process.cwd(), 'scripts', 'google_image_search_icrawler.py')
+  const queries = deriveQueries({ number: 0, title: '', keyMessage: '', bullets: [], imageQuery: query, imageQueries: [query] })
+  const args = [scriptPath]
+  for (const item of queries) {
+    args.push('--query', item)
   }
+  args.push('--max-num', '12')
 
-  return inlineImageDataUrl ? { inlineImageDataUrl } : null
-}
+  const { stdout } = await execFileAsync(
+    python,
+    args,
+    { timeout: 45_000, windowsHide: true, cwd: process.cwd() },
+  )
 
-async function searchOpenverseImages(query: string): Promise<OpenverseImage | null> {
-  const { fetch } = await import('undici')
-  const endpoint = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=1&mature=false`
-  const res = await fetch(endpoint, {
-    signal: AbortSignal.timeout(15000),
-    headers: { 'User-Agent': 'PPTX Slide Agent/1.0 (image lookup)' },
-  })
-  if (!res.ok) return null
-  const data = await res.json() as { results?: OpenverseImage[] }
-  return data.results?.[0] ?? null
+  const data = JSON.parse(stdout) as PythonImageSearchResponse
+
+  return (data.candidates ?? []).map((item, index) => ({
+    id: candidateId('google', item.imageUrl ?? item.thumbnailUrl ?? String(index)),
+    provider: 'google' as const,
+    searchQuery: item.searchQuery ?? query,
+    title: item.title ?? `Google image ${index + 1}`,
+    imageUrl: item.imageUrl ?? null,
+    thumbnailUrl: item.thumbnailUrl ?? item.imageUrl ?? null,
+    sourcePageUrl: item.sourcePageUrl ?? null,
+    attribution: item.attribution ?? item.sourcePageUrl ?? item.imageUrl ?? null,
+    inlineImageDataUrl: null,
+  })).filter((candidate) => Boolean(candidate.imageUrl || candidate.thumbnailUrl))
 }
 
 async function resolveImageFromSourcePage(pageUrl: string): Promise<string | null> {
@@ -226,66 +203,128 @@ async function writeDataUrlImage(dataUrl: string, destination: string): Promise<
   await fs.writeFile(destination, Buffer.from(base64, 'base64'))
 }
 
-async function resolveImageForSlide(slide: SlideImageRequest): Promise<SlideImageResult> {
-  const query = deriveQuery(slide)
-  if (!query) {
-    return { number: slide.number, imageQuery: null, imageUrl: null, imagePath: null, imageAttribution: null }
+function dedupeCandidates(candidates: ImageSearchCandidate[]): ImageSearchCandidate[] {
+  const seen = new Set<string>()
+  return candidates.filter((candidate) => {
+    const key = candidate.imageUrl ?? candidate.sourcePageUrl ?? candidate.inlineImageDataUrl ?? candidate.id
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+async function searchImageCandidatesForSlide(slide: ImageSearchRequest): Promise<ImageSearchResult> {
+  const queries = deriveQueries(slide)
+  const query = queries.join('\n')
+  if (queries.length === 0) {
+    return { query: '', candidates: [] }
   }
 
+  if (queries.every((item) => isHttpUrl(item))) {
+    return {
+      query,
+      candidates: queries.map((item) => ({
+        id: candidateId('direct', item),
+        provider: 'direct' as const,
+        searchQuery: item,
+        title: deriveCandidateTitle(item),
+        imageUrl: item,
+        thumbnailUrl: item,
+        sourcePageUrl: item,
+        attribution: item,
+        inlineImageDataUrl: null,
+      })),
+    }
+  }
+
+  return {
+    query,
+    candidates: dedupeCandidates((await Promise.all(queries.map((item) => searchGoogleImages(item)))).flat()).slice(0, 32),
+  }
+}
+
+async function downloadCandidateForSlide(slide: ImageSearchRequest, candidate: ImageSearchCandidate): Promise<ResolvedSlideImage> {
+  const query = candidate.searchQuery ?? deriveQuery(slide)
   try {
-    const directUrl = isHttpUrl(query) ? query : null
-    const googleMatch = directUrl ? null : await searchGoogleImages(query)
-    const sourcePageImage = googleMatch?.sourcePageUrl ? await resolveImageFromSourcePage(googleMatch.sourcePageUrl) : null
-    const openverseMatch = directUrl || googleMatch?.imageUrl || sourcePageImage || googleMatch?.inlineImageDataUrl ? null : await searchOpenverseImages(query)
+    const candidateUrls = [
+      candidate.imageUrl,
+      candidate.sourcePageUrl ? await resolveImageFromSourcePage(candidate.sourcePageUrl) : null,
+      candidate.thumbnailUrl,
+    ].filter((value): value is string => Boolean(value && isHttpUrl(value)))
 
-    const sourceUrl = directUrl
-      ?? googleMatch?.imageUrl
-      ?? sourcePageImage
-      ?? openverseMatch?.url
-      ?? openverseMatch?.thumbnail
-      ?? null
-    const inlineDataUrl = directUrl || sourceUrl ? null : googleMatch?.inlineImageDataUrl ?? null
+    const inlineDataUrl = candidate.inlineImageDataUrl
 
-    if (!sourceUrl && !inlineDataUrl) {
-      return { number: slide.number, imageQuery: query, imageUrl: null, imagePath: null, imageAttribution: null }
+    if (candidateUrls.length === 0 && !inlineDataUrl) {
+      return { id: candidate.id, number: slide.number, imageQuery: query, imageUrl: null, imagePath: null, imageAttribution: null, sourcePageUrl: candidate.sourcePageUrl, thumbnailUrl: candidate.thumbnailUrl }
     }
 
     const imagesDir = await ensureImagesDir()
     const { fetch } = await import('undici')
-    const head = sourceUrl ? await fetch(sourceUrl, { method: 'HEAD', signal: AbortSignal.timeout(10000) }).catch(() => null) : null
-    const ext = sourceUrl
-      ? extensionFromUrl(sourceUrl, head?.headers.get('content-type') ?? null)
+    const primaryUrl = candidateUrls[0] ?? null
+    const head = primaryUrl ? await fetch(primaryUrl, { method: 'HEAD', signal: AbortSignal.timeout(10000) }).catch(() => null) : null
+    const ext = primaryUrl
+      ? extensionFromUrl(primaryUrl, head?.headers.get('content-type') ?? null)
       : extensionFromDataUrl(inlineDataUrl!)
-    const filePath = path.join(imagesDir, `${String(slide.number).padStart(2, '0')}-${slugify(slide.title)}-${hashValue(sourceUrl ?? inlineDataUrl ?? query)}${ext}`)
+    const filePath = path.join(imagesDir, `${String(slide.number).padStart(2, '0')}-${slugify(slide.title)}-${hashValue(primaryUrl ?? inlineDataUrl ?? query)}${ext}`)
 
-    if (sourceUrl) {
-      await downloadImage(sourceUrl, filePath)
+    if (primaryUrl) {
+      let downloaded = false
+      for (const url of candidateUrls) {
+        try {
+          await downloadImage(url, filePath)
+          downloaded = true
+          break
+        } catch {
+          // Try the next available candidate URL before giving up.
+        }
+      }
+
+      if (!downloaded) {
+        return { id: candidate.id, number: slide.number, imageQuery: query, imageUrl: null, imagePath: null, imageAttribution: null, sourcePageUrl: candidate.sourcePageUrl, thumbnailUrl: candidate.thumbnailUrl }
+      }
     } else {
       await writeDataUrlImage(inlineDataUrl!, filePath)
     }
 
     return {
+      id: candidate.id,
       number: slide.number,
       imageQuery: query,
-      imageUrl: sourceUrl,
+      imageUrl: primaryUrl,
       imagePath: filePath,
-      imageAttribution: directUrl
-        ? sourceUrl
-        : googleMatch?.sourcePageUrl
-          ?? openverseMatch?.foreign_landing_url
-          ?? openverseMatch?.attribution
-          ?? openverseMatch?.title
-          ?? null,
+      imageAttribution: candidate.sourcePageUrl ?? candidate.attribution ?? candidate.title ?? primaryUrl,
+      sourcePageUrl: candidate.sourcePageUrl,
+      thumbnailUrl: candidate.thumbnailUrl,
     }
   } catch {
-    return { number: slide.number, imageQuery: query, imageUrl: null, imagePath: null, imageAttribution: null }
+    return { id: candidate.id, number: slide.number, imageQuery: query, imageUrl: null, imagePath: null, imageAttribution: null, sourcePageUrl: candidate.sourcePageUrl, thumbnailUrl: candidate.thumbnailUrl }
+  }
+}
+
+async function resolveImageForSlide(slide: ImageSearchRequest): Promise<ResolvedSlideImage> {
+  try {
+    const search = await searchImageCandidatesForSlide(slide)
+    if (search.candidates.length === 0) {
+      return { id: candidateId('empty', String(slide.number), search.query), number: slide.number, imageQuery: search.query || null, imageUrl: null, imagePath: null, imageAttribution: null, sourcePageUrl: null, thumbnailUrl: null }
+    }
+    return downloadCandidateForSlide(slide, search.candidates[0])
+  } catch {
+    return { id: candidateId('failed', String(slide.number), deriveQuery(slide)), number: slide.number, imageQuery: deriveQuery(slide) || null, imageUrl: null, imagePath: null, imageAttribution: null, sourcePageUrl: null, thumbnailUrl: null }
   }
 }
 
 export function registerImageHandlers(): void {
-  ipcMain.handle('images:resolveForSlides', async (_event, slides: SlideImageRequest[]): Promise<SlideImageResult[]> => {
+  ipcMain.handle('images:searchForSlide', async (_event, slide: ImageSearchRequest): Promise<ImageSearchResult> => {
+    return searchImageCandidatesForSlide(slide)
+  })
+
+  ipcMain.handle('images:downloadForSlide', async (_event, slide: ImageSearchRequest, candidate: ImageSearchCandidate): Promise<ResolvedSlideImage> => {
+    return downloadCandidateForSlide(slide, candidate)
+  })
+
+  ipcMain.handle('images:resolveForSlides', async (_event, slides: ImageSearchRequest[]): Promise<ResolvedSlideImage[]> => {
     if (!Array.isArray(slides) || slides.length === 0) return []
-    const results: SlideImageResult[] = []
+    const results: ResolvedSlideImage[] = []
     for (const slide of slides) {
       results.push(await resolveImageForSlide(slide))
     }
