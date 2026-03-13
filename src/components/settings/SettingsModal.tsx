@@ -121,7 +121,7 @@ export function SettingsModal({ onClose }: Props) {
                 Values are saved to the app's user-data folder and applied to the running process immediately.
               </p>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                For slide images, the app supports direct image URLs in `imageQuery` and Google image search through the local Python environment. Enter one or more keywords and select one or more images per slide.
+                For slide images, the app supports direct image URLs in `imageQuery` and web image search through the local Python environment. Enter one or more keywords and select one or more images per slide.
               </p>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 The preview panel renders local slide images from the generated PPTX on Windows. This requires Microsoft PowerPoint to be installed.

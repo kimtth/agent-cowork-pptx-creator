@@ -235,9 +235,19 @@ function SlideListItem({
                 const src = image.imagePath
                   ? toLocalImageUrl(image.imagePath)
                   : image.thumbnailUrl ?? image.imageUrl ?? null
+                const isUrlOnly = !image.imagePath && Boolean(image.imageUrl || image.thumbnailUrl)
                 return (
                   <div key={image.id} className="relative h-16 w-16 overflow-hidden border" style={{ borderColor: 'var(--panel-border)', background: 'var(--surface-hover)' }}>
                     {src ? <img src={src} alt="" className="h-full w-full object-contain" draggable={false} /> : null}
+                    {isUrlOnly && (
+                      <span
+                        title="Image not downloaded locally — will be fetched at save time"
+                        className="absolute bottom-0 left-0 flex h-4 w-4 items-center justify-center text-[9px]"
+                        style={{ background: 'rgba(234, 179, 8, 0.9)', color: '#1e1e1e' }}
+                      >
+                        !
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={() => removeSlideImage(slide.number, image.id)}

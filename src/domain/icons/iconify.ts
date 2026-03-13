@@ -1,30 +1,3 @@
-export const LEGACY_ICON_ALIASES: Record<string, string> = {
-  'arrow-trending-up': 'mdi:trending-up',
-  brain: 'mdi:brain',
-  building: 'mdi:domain',
-  calendar: 'mdi:calendar',
-  chart: 'mdi:chart-box',
-  'checkmark-circle': 'mdi:check-circle-outline',
-  cloud: 'mdi:cloud-outline',
-  code: 'mdi:code-tags',
-  'data-trending': 'mdi:chart-line',
-  document: 'mdi:file-document-outline',
-  globe: 'mdi:earth',
-  lightbulb: 'mdi:lightbulb-on-outline',
-  link: 'mdi:link-variant',
-  'lock-closed': 'mdi:lock-outline',
-  money: 'mdi:cash',
-  'people-team': 'mdi:account-group-outline',
-  rocket: 'mdi:rocket-outline',
-  search: 'mdi:magnify',
-  settings: 'mdi:cog-outline',
-  shield: 'mdi:shield-check-outline',
-  sparkle: 'mdi:star-four-points-outline',
-  star: 'mdi:star-outline',
-  target: 'mdi:target',
-  warning: 'mdi:alert-outline',
-}
-
 export const ICONIFY_COLLECTIONS = [
   {
     id: 'all',
@@ -84,7 +57,6 @@ export const DEFAULT_ICONIFY_COLLECTION: IconifyCollectionId = 'all'
 export const ICONIFY_EXAMPLES = ICONIFY_COLLECTIONS[0].examples
 
 export const ICONIFY_PROMPT_HINTS = [
-  ...Object.keys(LEGACY_ICON_ALIASES),
   ...ICONIFY_EXAMPLES,
 ] as const
 
@@ -105,12 +77,11 @@ export function normalizeIconName(value: string | null | undefined): string | nu
   if (!raw) return null
   const lowered = raw.toLowerCase()
   if (lowered.includes(':')) return lowered
-  if (LEGACY_ICON_ALIASES[lowered]) return LEGACY_ICON_ALIASES[lowered]
   return `mdi:${lowered}`
 }
 
 export function getAvailableIconChoices(collectionId: IconifyCollectionId = DEFAULT_ICONIFY_COLLECTION): string[] {
-  return [...new Set([...Object.keys(LEGACY_ICON_ALIASES), ...getIconifyExamples(collectionId)])]
+  return [...new Set([...getIconifyExamples(collectionId)])]
 }
 
 export function buildIconifySvgUrl(iconName: string, colorHex?: string): string {

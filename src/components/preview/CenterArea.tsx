@@ -2,53 +2,118 @@
  * CenterArea: locally rendered PPTX preview + export toolbar
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, Palette, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useSlidesStore } from '../../stores/slides-store'
 import { usePaletteStore } from '../../stores/palette-store'
 import { useChatStore } from '../../stores/chat-store'
+import { useDataSourcesStore } from '../../stores/data-sources-store'
+import { useProjectStore } from '../../stores/project-store'
 import { PptxPreviewCard } from './PptxPreviewCard.tsx'
-import { createAssistantMessage } from '../../application/chat-use-case'
+import { createAssistantMessage, createUserMessage, historyToIpc } from '../../application/chat-use-case'
+import { getAvailableIconChoices } from '../../domain/icons/iconify'
+import { getWorkflowConfig } from '../../domain/workflows/workflow-config'
 
 export function CenterArea() {
-  const { work } = useSlidesStore()
-  const { tokens } = usePaletteStore()
-  const { addMessage } = useChatStore()
+  const { work, setPptxBuildError, setStreaming } = useSlidesStore()
+  const { tokens, selectedIconCollection } = usePaletteStore()
+  const { addMessage, messages } = useChatStore()
+  const { files: dataSources, urls: urlSources } = useDataSourcesStore()
+  const { workspaceDir } = useProjectStore()
   const [selected, setSelected] = useState(0)
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
-  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewWarning, setPreviewWarning] = useState<string | null>(null)
   const [rendering, setRendering] = useState(false)
   const [previewImages, setPreviewImages] = useState<string[]>([])
+  const [previewCacheToken, setPreviewCacheToken] = useState(0)
 
   const slides = work.slides
+  const prevPptxCodeRef = useRef<string | null>(null)
+
+  /** Send the build error to the coding agent for automatic regeneration */
+  const triggerErrorFeedback = (error: string) => {
+    setPptxBuildError(error)
+    const availableIcons = getAvailableIconChoices(selectedIconCollection)
+    const workflow = getWorkflowConfig('create-pptx')
+    const errorMessage = 'The generated python-pptx code failed to execute. Apply a MINIMAL fix — only change the specific lines causing the error. Do NOT regenerate the entire file from scratch.'
+    addMessage(createUserMessage(errorMessage))
+    setStreaming(true)
+    window.electronAPI.chat.send(errorMessage, historyToIpc(messages), {
+      title: work.title,
+      slides: work.slides,
+      designBrief: work.designBrief,
+      designStyle: work.designStyle,
+      framework: work.framework,
+      pptxBuildError: error,
+      theme: tokens,
+      workflow,
+      dataSources,
+      urlSources,
+      iconProvider: 'iconify',
+      iconCollection: selectedIconCollection,
+      availableIcons,
+    })
+  }
 
   useEffect(() => {
     setSelected((current) => Math.min(current, Math.max(previewImages.length - 1, 0)))
   }, [previewImages.length])
 
   useEffect(() => {
+    prevPptxCodeRef.current = null
+    setPreviewImages([])
+    setPreviewCacheToken((current) => current + 1)
+    setPreviewWarning(null)
+    setSelected(0)
+  }, [workspaceDir])
+
+  useEffect(() => {
     let cancelled = false
+    const prevCode = prevPptxCodeRef.current
+    prevPptxCodeRef.current = work.pptxCode
 
     const run = async () => {
       if (!work.pptxCode) {
         setPreviewImages([])
-        setPreviewError(null)
+        setPreviewWarning(null)
         setRendering(false)
         return
       }
 
+      // Only check existing previews when pptxCode first appears (null → code),
+      // e.g. loading a .pptapp file. When code updates (code → new code), always re-render.
+      if (!prevCode) {
+        try {
+          const existing = await window.electronAPI.pptx.readExistingPreviews()
+          if (cancelled) return
+          if (existing.success && existing.imagePaths.length > 0) {
+            setPreviewImages(existing.imagePaths)
+            setPreviewCacheToken((current) => current + 1)
+            setRendering(false)
+            return
+          }
+        } catch {
+          // ignore — fall through to full render
+        }
+        if (cancelled) return
+      }
+
       setRendering(true)
-      setPreviewError(null)
-      const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation')
+      setPreviewWarning(null)
+      const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation', selectedIconCollection)
       if (cancelled) return
 
       if (result.success) {
         setPreviewImages(result.imagePaths ?? [])
-        if (result.warning) setPreviewError(result.warning)
+        setPreviewCacheToken((current) => current + 1)
+        if (result.warning) setPreviewWarning(result.warning)
       } else {
         setPreviewImages([])
-        setPreviewError(result.error ?? 'Failed to render slide preview')
+        setPreviewCacheToken((current) => current + 1)
+        // Pass execution errors to the coding agent for auto-regeneration
+        const errorText = result.error ?? 'Failed to render slide preview'
+        triggerErrorFeedback(errorText)
       }
       setRendering(false)
     }
@@ -58,19 +123,35 @@ export function CenterArea() {
     return () => {
       cancelled = true
     }
-  }, [work.pptxCode, tokens, work.title])
+  }, [work.pptxCode, tokens, work.title, workspaceDir, selectedIconCollection])
 
   const refreshPreview = async () => {
     if (!work.pptxCode) return
     setRendering(true)
-    setPreviewError(null)
-    const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation')
+    setPreviewWarning(null)
+
+    try {
+      const existing = await window.electronAPI.pptx.readExistingPreviews()
+      if (existing.success && existing.imagePaths.length > 0) {
+        setPreviewImages(existing.imagePaths)
+        setPreviewCacheToken((current) => current + 1)
+        setRendering(false)
+        return
+      }
+    } catch {
+      // ignore and fall back to a fresh render
+    }
+
+    const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation', selectedIconCollection)
     if (result.success) {
       setPreviewImages(result.imagePaths ?? [])
-      if (result.warning) setPreviewError(result.warning)
+      setPreviewCacheToken((current) => current + 1)
+      if (result.warning) setPreviewWarning(result.warning)
     } else {
       setPreviewImages([])
-      setPreviewError(result.error ?? 'Failed to render slide preview')
+      setPreviewCacheToken((current) => current + 1)
+      const errorText = result.error ?? 'Failed to render slide preview'
+      triggerErrorFeedback(errorText)
     }
     setRendering(false)
   }
@@ -80,7 +161,7 @@ export function CenterArea() {
     setExporting(true)
     setExportError(null)
     try {
-      const result = await window.electronAPI.pptx.generate(work.pptxCode, tokens, work.title || 'presentation')
+      const result = await window.electronAPI.pptx.generate(work.pptxCode, tokens, work.title || 'presentation', selectedIconCollection)
 
       if (result.success) {
         addMessage(createAssistantMessage(`PPTX generation complete.${result.path ? ` Saved to ${result.path}.` : ''}`))
@@ -158,12 +239,12 @@ export function CenterArea() {
         </div>
       )}
 
-      {previewError && (
+      {previewWarning && (
         <div
           className="flex-none border px-4 py-2 text-xs"
           style={{ borderColor: '#fed7aa', background: '#fff7ed', color: '#c2410c' }}
         >
-          {previewError}
+          {previewWarning}
         </div>
       )}
 
@@ -200,6 +281,7 @@ export function CenterArea() {
             <PptxPreviewCard
               title={slides[selected]?.title ?? `Slide ${selected + 1}`}
               imagePath={previewImages[selected]}
+              cacheKey={`${previewCacheToken}:${previewImages[selected]}`}
               scale={0.55}
               selected
             />
@@ -232,6 +314,7 @@ export function CenterArea() {
               <PptxPreviewCard
                 title={slides[i]?.title ?? `Slide ${i + 1}`}
                 imagePath={imagePath}
+                cacheKey={`${previewCacheToken}:${imagePath}`}
                 scale={0.12}
                 selected={i === selected}
                 onClick={() => setSelected(i)}

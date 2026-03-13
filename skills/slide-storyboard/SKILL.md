@@ -1,6 +1,6 @@
 ---
 name: slide-storyboard
-description: Analyzes user requests and provided materials to create a presentation slide story (structure plan). Uses the set_scenario tool to output directly to the workspace panel. Also calls suggest_framework to recommend the best consulting framework before building the story.
+description: Analyzes user requests and provided materials to create a presentation slide story (structure plan). Uses the set_scenario tool to output directly to the workspace panel. Also calls suggest_framework to present available business frameworks to the user for selection.
 ---
 
 # Slide Story Creation Skill
@@ -43,9 +43,9 @@ After calling the tool, return only a short message in chat: e.g., "Slide struct
 - Converting complex topics or long documents into a presentation
 - When the user wants to confirm the story before generating PPTX
 
-## Step 0: Recommend Framework First
+## Step 0: Confirm Framework With the User
 
-**Before calling set_scenario, always call `suggest_framework` to recommend the most appropriate consulting framework.**
+**The business framework is defined by the user, not by the assistant.** If the user has already specified a framework, use it directly. If no framework has been specified, present the available options using `suggest_framework` and ask the user which one to use. Do not auto-select a framework on the user's behalf.
 
 Framework selection guide:
 
@@ -152,22 +152,7 @@ N+1. Appendix section (layout: section)
 ### 3. Content Quality Requirements
 - Include concrete data/numbers in bullets (e.g., "Market grew 40% YoY (Gartner 2025)")
 - Notes must be 2–3 sentences, never empty or just a dash
-- If web_search was used, include source URLs in notes
 - Avoid generic statements — every bullet should be specific and defensible
-
-## Information Gathering (When web_search Is Available)
-
-**Search at least 3 times with different queries before building the story.**
-
-Search strategy:
-1. **Official data**: product docs, specs, official announcements
-2. **Market data**: numbers, adoption rates, market size, growth rates
-3. **Case studies**: real-world examples, best practices
-4. **Latest trends**: new features, updates (add extra searches as needed)
-
-Rules:
-- Record source URLs and add them to slide `notes`
-- Use specific data found in search, not generic AI-generated claims
 
 ## set_scenario Output Fields
 
@@ -198,9 +183,7 @@ Rules:
 
 ## Available Icons
 
-`arrow-trending-up`, `brain`, `building`, `calendar`, `chart`, `checkmark-circle`, `cloud`, `code`, `data-trending`, `document`, `globe`, `lightbulb`, `link`, `lock-closed`, `money`, `people-team`, `rocket`, `search`, `settings`, `shield`, `sparkle`, `star`, `target`, `warning`
-
-Assign one icon per slide as a design hint.
+Icons are provided by **Iconify**. Use Iconify icon IDs (e.g., `mdi:brain`, `lucide:rocket`) or legacy aliases (e.g., `brain`, `rocket`). The available icon names are supplied in the workspace context at runtime. Assign one icon per slide as a design hint.
 
 ## Language Rules
 
@@ -215,6 +198,4 @@ Assign one icon per slide as a design hint.
 - [ ] Bullets contain specific numbers/data
 - [ ] The deck has a logical arc (intro → body → conclusion)
 - [ ] Vocabulary level is appropriate for the target audience
-- [ ] web_search was run at least 3 times (when available)
-- [ ] Source URLs in notes (when web_search was used)
-- [ ] `suggest_framework` was called before `set_scenario`
+- [ ] Framework was confirmed with the user (or user-specified framework was applied) before `set_scenario`

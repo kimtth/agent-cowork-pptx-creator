@@ -52,10 +52,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   pptx: {
-    generate: (code: string, themeTokens: unknown, title: string) =>
-      ipcRenderer.invoke('pptx:generate', code, themeTokens, title),
-    renderPreview: (code: string, themeTokens: unknown, title: string) =>
-      ipcRenderer.invoke('pptx:renderPreview', code, themeTokens, title),
+    generate: (code: string, themeTokens: unknown, title: string, iconCollection?: string) =>
+      ipcRenderer.invoke('pptx:generate', code, themeTokens, title, iconCollection),
+    renderPreview: (code: string, themeTokens: unknown, title: string, iconCollection?: string) =>
+      ipcRenderer.invoke('pptx:renderPreview', code, themeTokens, title, iconCollection),
+    readExistingPreviews: () =>
+      ipcRenderer.invoke('pptx:readExistingPreviews'),
   },
 
   fs: {

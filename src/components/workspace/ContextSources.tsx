@@ -1,5 +1,5 @@
 /**
- * DataSources: file picker + URL scraper
+ * ContextSources: file picker + URL scraper
  */
 
 import { useState } from 'react'
@@ -7,7 +7,7 @@ import { FolderOpen, Link, X, Loader2, CheckCircle, AlertCircle, RefreshCw } fro
 import type { DataFile } from '../../domain/ports/ipc'
 import { useDataSourcesStore } from '../../stores/data-sources-store'
 
-export function DataSources() {
+export function ContextSources() {
   const { files, urls, setFiles, setUrls } = useDataSourcesStore()
   const [urlInput, setUrlInput] = useState('')
   const [loading, setLoading] = useState(false)

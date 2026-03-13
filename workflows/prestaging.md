@@ -13,7 +13,7 @@ Create or refine the preliminary presentation structure before any PPTX code is 
 
 ## Objective
 
-Understand the available source content and business context, choose the most suitable framework, and stage preliminary slide definitions in the slide panel.
+Understand the available source content and business context, confirm the desired business framework with the user, and stage preliminary slide definitions in the slide panel.
 
 ## Inputs
 
@@ -26,7 +26,7 @@ Understand the available source content and business context, choose the most su
 
 1. Review the available content, summaries, and current slide state.
 2. Identify the business objective, target audience, decision context, and communication constraints.
-3. Choose or justify the most appropriate business framework for the presentation.
+3. If the user has already specified a framework (visible in Current Workspace), apply it immediately — do NOT ask the user to confirm or re-select. Only present framework options if no framework is set.
 4. Produce or refine the preliminary slide scenario in the slide panel.
 5. Use strong action-title headlines and coherent business logic across slides.
 6. Stop after the slide scenario has been staged for human review.

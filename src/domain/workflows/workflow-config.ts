@@ -26,13 +26,13 @@ export const WORKFLOW_CONFIGS: Record<WorkflowId, WorkflowConfig> = {
     goal: 'Create preliminary slide definitions in the slide panel without generating PPTX code.',
     steps: [
       'Understand the available content, business objective, audience, and constraints.',
-      'Choose or justify the most suitable business framework for the presentation.',
+      'Confirm the desired business framework with the user, or present options if not yet specified.',
       'Generate or refine the preliminary slide scenario in the slide panel.',
       'Leave room for the user to tweak slides and attach images before PPTX creation.',
       'Do not generate python-pptx code in this workflow.',
     ],
     agentDirective: 'Use this workflow for content understanding and slide planning only. Produce or update the slide scenario in the workspace panel and stop before PPTX generation.',
-    triggerPrompt: 'Start the prestaging workflow now. Understand the content, choose the best business framework, and generate the preliminary slide scenario in the slide panel. Do not generate PPTX code in this step.',
+    triggerPrompt: 'Start the prestaging workflow now. Understand the content. If the user has already selected a business framework (shown in Current Workspace), apply it directly — do NOT ask again. If no framework is set, present the options and ask the user to choose. Then generate the preliminary slide scenario in the slide panel. Do not generate PPTX code in this step.',
   },
   'create-pptx': {
     id: 'create-pptx',
@@ -45,12 +45,12 @@ export const WORKFLOW_CONFIGS: Record<WorkflowId, WorkflowConfig> = {
     steps: [
       'Use the approved slide panel content as the source of truth.',
       'Apply the selected icon set, theme, palette, and any images attached to each slide.',
-      'Run the slide-final-review workflow before code generation to catch visual inconsistencies.',
-      'Generate the final python-pptx code only after the composition has been corrected.',
+      'Ensure contrast safety and readability before generating code.',
+      'Generate the final python-pptx code. The layout validator will catch overlap and overflow issues automatically.',
       'Return only the final python code block so the app can render preview images in the center area.',
     ],
-    agentDirective: 'Use this workflow for final PPTX creation only. Treat slide-final-review as mandatory before writing python-pptx code, then output only the final code block.',
-    triggerPrompt: 'Run the create PPTX workflow now. Use the approved slides, theme, icons, colors, and attached images. Review the composition with slide-final-review before generating python-pptx code, then return only the final python code block.',
+    agentDirective: 'Use this workflow for final PPTX creation only. Output the final python-pptx code block. If layout validation fails, use patch_layout_infrastructure and rerun_pptx to fix it.',
+    triggerPrompt: 'Run the create PPTX workflow now. Use the approved slides, theme, icons, colors, and attached images. Generate the final python-pptx code block. If layout validation fails, use patch_layout_infrastructure to fix the layout specs and rerun_pptx to re-execute.',
   },
 }
 

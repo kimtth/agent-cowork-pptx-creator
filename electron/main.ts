@@ -18,6 +18,7 @@ import { registerScrapeHandlers } from './ipc/scrape-handler.ts';
 import { registerImageHandlers } from './ipc/image-handler.ts';
 import { registerSettingsHandlers, applySettingsToEnv } from './ipc/settings-handler.ts';
 import { registerProjectHandlers } from './ipc/project-handler.ts';
+import { readWorkspaceDir } from './ipc/workspace-utils.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -30,7 +31,20 @@ function registerLocalImageProtocol(): void {
     if (!filePath) {
       return new Response('Missing path', { status: 400 })
     }
-    return net.fetch(pathToFileURL(filePath).toString())
+
+    const workspaceDir = await readWorkspaceDir()
+    const resolvedPath = path.resolve(filePath)
+    const allowedRoots = [
+      path.resolve(path.join(workspaceDir, 'previews')),
+      path.resolve(path.join(workspaceDir, 'images')),
+    ]
+    const isAllowed = allowedRoots.some((root) => resolvedPath === root || resolvedPath.startsWith(`${root}${path.sep}`))
+
+    if (!isAllowed) {
+      return new Response('Forbidden path', { status: 403 })
+    }
+
+    return net.fetch(pathToFileURL(resolvedPath).toString())
   })
 }
 

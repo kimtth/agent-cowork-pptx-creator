@@ -102,10 +102,10 @@ function StreamingBubble({ scrollRef }: { scrollRef: React.RefObject<HTMLDivElem
       </span>
       {pendingThinking && (
         <div
-          className="text-xs px-4 py-3 border italic"
-          style={{ color: 'var(--text-secondary)', background: 'var(--surface-hover)', borderColor: 'var(--panel-border)' }}
+          className="text-xs px-4 py-3 border italic overflow-hidden"
+          style={{ color: 'var(--text-secondary)', background: 'var(--surface-hover)', borderColor: 'var(--panel-border)', maxHeight: '12.5em', lineHeight: '1.5' }}
         >
-          {pendingThinking.slice(-200)}
+          {pendingThinking.slice(-600)}
         </div>
       )}
       {pendingContent && <StreamingTextMessage content={pendingContent} />}
@@ -168,7 +168,12 @@ export function ChatPanel() {
   const brainstorm = async () => {
     if (streaming) return
     const workflow = getWorkflowConfig('prestaging')
-    const prompt = input.trim() || workflow.triggerPrompt
+    let prompt = input.trim()
+    if (!prompt) {
+      prompt = work.framework
+        ? `Start the prestaging workflow now. The user has already chosen the "${work.framework}" business framework — apply it directly and do NOT ask the user to choose again. Understand the content and generate the preliminary slide scenario in the slide panel. Do not generate PPTX code in this step.`
+        : workflow.triggerPrompt
+    }
     await sendMessage(prompt, { workflowId: workflow.id })
   }
 

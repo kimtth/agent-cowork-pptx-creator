@@ -6,6 +6,7 @@ import { ipcMain, dialog, app, BrowserWindow } from 'electron';
 import fs from 'fs/promises';
 import path from 'path';
 import { readWorkspaceDir, writeWorkspaceDir } from './workspace-utils.ts';
+import { saveProjectAsZip, loadProjectFromZip } from './project-zip.ts';
 
 // ---------------------------------------------------------------------------
 // Safe dialog helpers — use parent window when available, fall back to modal-less
@@ -66,18 +67,17 @@ export function registerProjectHandlers(): void {
     });
     if (canceled || !filePath) return { success: false };
 
-    const json = JSON.stringify(projectData, null, 2);
-    await fs.writeFile(filePath, json, 'utf-8');
+    await saveProjectAsZip(projectData as any, filePath);
     return { success: true, path: filePath };
   });
 
   /** Show open dialog filtered to .pptapp, return parsed project data */
   ipcMain.handle('project:load', async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    const workspaceDir = await readWorkspaceDir();
+    const currentDir = await readWorkspaceDir();
     const { filePaths, canceled } = await openDialog(win, {
       title: 'Open Project',
-      defaultPath: workspaceDir,
+      defaultPath: currentDir,
       filters: [
         { name: 'PPTX Slide Agent Project', extensions: ['pptapp'] },
         { name: 'All Files', extensions: ['*'] },
@@ -85,8 +85,12 @@ export function registerProjectHandlers(): void {
       properties: ['openFile'],
     });
     if (canceled || filePaths.length === 0) return null;
-    const raw = await fs.readFile(filePaths[0], 'utf-8');
-    const parsed = JSON.parse(raw) as unknown;
+
+    // Switch workspace to the directory containing the .pptapp file
+    const newWorkspaceDir = path.dirname(filePaths[0]);
+    await writeWorkspaceDir(newWorkspaceDir);
+
+    const parsed = await loadProjectFromZip(filePaths[0], newWorkspaceDir);
     return { data: parsed, path: filePaths[0] };
   });
 

@@ -14,6 +14,7 @@ const execFileAsync = promisify(execFile)
 interface PythonImageSearchResponse {
   query?: string
   candidates?: Array<{
+    provider?: 'google' | 'bing' | null
     searchQuery?: string | null
     imageUrl?: string | null
     thumbnailUrl?: string | null
@@ -140,16 +141,16 @@ async function searchGoogleImages(query: string): Promise<ImageSearchCandidate[]
   const { stdout } = await execFileAsync(
     python,
     args,
-    { timeout: 45_000, windowsHide: true, cwd: process.cwd() },
+    { timeout: 45_000, windowsHide: true, cwd: process.cwd(), env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
   )
 
   const data = JSON.parse(stdout) as PythonImageSearchResponse
 
   return (data.candidates ?? []).map((item, index) => ({
-    id: candidateId('google', item.imageUrl ?? item.thumbnailUrl ?? String(index)),
-    provider: 'google' as const,
+    id: candidateId(item.provider ?? 'google', item.imageUrl ?? item.thumbnailUrl ?? String(index)),
+    provider: item.provider === 'bing' ? 'bing' as const : 'google' as const,
     searchQuery: item.searchQuery ?? query,
-    title: item.title ?? `Google image ${index + 1}`,
+    title: item.title ?? `${item.provider === 'bing' ? 'Bing' : 'Google'} image ${index + 1}`,
     imageUrl: item.imageUrl ?? null,
     thumbnailUrl: item.thumbnailUrl ?? item.imageUrl ?? null,
     sourcePageUrl: item.sourcePageUrl ?? null,

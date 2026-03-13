@@ -1,0 +1,495 @@
+"""Post-processing validator for python-pptx slide layouts.
+
+Detects overlapping shapes, out-of-bounds elements, and cramped spacing,
+while keeping geometry changes limited to auto-size enforcement and boundary clamping.
+
+Usage:
+
+    from pptx import Presentation
+    from layout_validator import validate_presentation, fix_presentation
+
+    prs = Presentation('deck.pptx')
+    issues = validate_presentation(prs)
+    if issues:
+        fixed = fix_presentation(prs, issues)
+        print(f'Applied {fixed} non-layout geometry fixes')
+    prs.save('deck.pptx')
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+from pptx.util import Inches
+from layout_specs import estimate_text_height_in
+
+SLIDE_WIDTH_EMU = Inches(13.333)
+SLIDE_HEIGHT_EMU = Inches(7.5)
+SAFE_MARGIN_EMU = Inches(0.3)
+MIN_GAP_EMU = Inches(0.15)
+OVERLAP_TOLERANCE_EMU = Inches(0.05)
+
+# Auto-size constant (avoids import issues when MSO_AUTO_SIZE isn't available)
+_TEXT_TO_FIT_SHAPE = 2  # MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+
+class IssueSeverity(Enum):
+    INFO = 'info'
+    WARNING = 'warning'
+    ERROR = 'error'
+
+
+class IssueType(Enum):
+    OVERLAP = 'overlap'
+    OUT_OF_BOUNDS = 'out_of_bounds'
+    CRAMPED = 'cramped'
+    TEXT_OVERFLOW = 'text_overflow'
+
+
+@dataclass
+class ShapeBox:
+    """Bounding box for a shape in EMU."""
+    left: int
+    top: int
+    width: int
+    height: int
+    shape_name: str = ''
+    shape_id: int = 0
+
+    @property
+    def right(self) -> int:
+        return self.left + self.width
+
+    @property
+    def bottom(self) -> int:
+        return self.top + self.height
+
+
+@dataclass
+class LayoutIssue:
+    slide_index: int
+    issue_type: IssueType
+    severity: IssueSeverity
+    message: str
+    shape_a: str = ''
+    shape_b: str = ''
+
+
+def _get_shape_box(shape) -> ShapeBox | None:
+    """Extract bounding box from a python-pptx shape, or None if not positioned."""
+    try:
+        left = shape.left
+        top = shape.top
+        width = shape.width
+        height = shape.height
+    except (AttributeError, TypeError):
+        return None
+    if left is None or top is None or width is None or height is None:
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    name = getattr(shape, 'name', '') or ''
+    shape_id = getattr(shape, 'shape_id', 0) or 0
+    return ShapeBox(left=left, top=top, width=width, height=height,
+                    shape_name=name, shape_id=shape_id)
+
+
+def _boxes_overlap(a: ShapeBox, b: ShapeBox) -> bool:
+    """AABB intersection test with a small tolerance to ignore trivial edge touches."""
+    if a.right - OVERLAP_TOLERANCE_EMU <= b.left:
+        return False
+    if b.right - OVERLAP_TOLERANCE_EMU <= a.left:
+        return False
+    if a.bottom - OVERLAP_TOLERANCE_EMU <= b.top:
+        return False
+    if b.bottom - OVERLAP_TOLERANCE_EMU <= a.top:
+        return False
+    return True
+
+
+def _overlap_area(a: ShapeBox, b: ShapeBox) -> int:
+    """Return the overlapping area in EMU² (0 if no overlap)."""
+    ox = max(0, min(a.right, b.right) - max(a.left, b.left))
+    oy = max(0, min(a.bottom, b.bottom) - max(a.top, b.top))
+    return ox * oy
+
+
+def _is_contained(inner: ShapeBox, outer: ShapeBox, tolerance: int = 2) -> bool:
+    """Return True if *inner* is fully contained within *outer* (within EMU tolerance)."""
+    return (inner.left >= outer.left - tolerance and
+            inner.top >= outer.top - tolerance and
+            inner.right <= outer.right + tolerance and
+            inner.bottom <= outer.bottom + tolerance)
+
+
+def _is_background_fill(shape) -> bool:
+    """Heuristic: shapes covering the full slide are background fills, not content."""
+    box = _get_shape_box(shape)
+    if box is None:
+        return False
+    covers_w = box.width >= SLIDE_WIDTH_EMU * 0.95
+    covers_h = box.height >= SLIDE_HEIGHT_EMU * 0.95
+    return covers_w and covers_h
+
+
+def _is_decorative_frame(shape) -> bool:
+    """Heuristic: unfilled rectangles that span a large portion of the slide
+    are decorative borders / frames (e.g. double-frame outlines) and should
+    be excluded from overlap detection.
+
+    Criteria:
+      - Rectangle or Rounded Rectangle auto-shape (type 1 or 5)
+      - No solid fill (background fill or no fill)
+      - No meaningful text content
+      - Covers at least 50% of slide width AND 50% of slide height
+    """
+    box = _get_shape_box(shape)
+    if box is None:
+        return False
+
+    # Must be large enough to act as a border frame
+    is_large = (box.width >= SLIDE_WIDTH_EMU * 0.50 and
+                box.height >= SLIDE_HEIGHT_EMU * 0.50)
+    if not is_large:
+        return False
+
+    # Must have no text content
+    text = _shape_text(shape)
+    if text:
+        return False
+
+    # Must have no solid fill (background or no fill)
+    try:
+        fill = shape.fill
+        # fill.type: None=no fill, 0=background, 1=solid, ...
+        fill_type = fill.type
+        if fill_type is not None and int(fill_type) == 1:  # solid fill
+            return False
+    except Exception:
+        pass
+
+    return True
+
+
+def _shape_text(shape) -> str:
+    if not getattr(shape, 'has_text_frame', False):
+        return ''
+    try:
+        return '\n'.join(paragraph.text for paragraph in shape.text_frame.paragraphs).strip()
+    except Exception:
+        return ''
+
+
+def _max_font_size_pt(shape, fallback: float = 18.0) -> float:
+    if not getattr(shape, 'has_text_frame', False):
+        return fallback
+    sizes: list[float] = []
+    try:
+        for paragraph in shape.text_frame.paragraphs:
+            if paragraph.font.size is not None:
+                sizes.append(paragraph.font.size.pt)
+            for run in paragraph.runs:
+                if run.font.size is not None:
+                    sizes.append(run.font.size.pt)
+    except Exception:
+        return fallback
+    return max(sizes) if sizes else fallback
+
+
+def _estimate_required_text_height_in(shape, box: ShapeBox) -> float | None:
+    text = _shape_text(shape)
+    if not text:
+        return None
+
+    width_in = box.width / 914400
+    if width_in <= 0.15:
+        return None
+
+    font_pt = _max_font_size_pt(shape)
+    required = estimate_text_height_in(text, width_in, font_pt)
+
+    # Add a small pad for text frame margins and bullet indentation.
+    if any(line.lstrip().startswith(('-', '*', '\u2022', '\u25cf', '\u25aa', '•')) for line in text.splitlines()):
+        required += 0.08
+    return required + 0.04
+
+
+def validate_slide(slide, slide_index: int) -> list[LayoutIssue]:
+    """Validate a single slide for layout issues."""
+    issues: list[LayoutIssue] = []
+    boxes: list[tuple[ShapeBox, object]] = []
+
+    for shape in slide.shapes:
+        if _is_background_fill(shape):
+            continue
+        if _is_decorative_frame(shape):
+            continue
+        box = _get_shape_box(shape)
+        if box is None:
+            continue
+        boxes.append((box, shape))
+
+    # 0. Text overflow / dense text check
+    for box, shape in boxes:
+        required_h_in = _estimate_required_text_height_in(shape, box)
+        if required_h_in is None:
+            continue
+        available_h_in = box.height / 914400
+        ratio = required_h_in / max(available_h_in, 0.01)
+        if ratio > 1.12:
+            overflow_sev = IssueSeverity.ERROR
+            # Shapes with TEXT_TO_FIT_SHAPE let PowerPoint auto-shrink the
+            # font, so overflow is cosmetic rather than structural.
+            try:
+                if (getattr(shape, 'has_text_frame', False)
+                        and shape.text_frame.auto_size == _TEXT_TO_FIT_SHAPE):
+                    overflow_sev = IssueSeverity.WARNING
+            except Exception:
+                pass
+            issues.append(LayoutIssue(
+                slide_index=slide_index,
+                issue_type=IssueType.TEXT_OVERFLOW,
+                severity=overflow_sev,
+                message=(
+                    f'Shape "{box.shape_name}" text needs about {required_h_in:.2f}" '
+                    f'but only {available_h_in:.2f}" is available'
+                ),
+                shape_a=box.shape_name,
+            ))
+        elif ratio > 0.92:
+            issues.append(LayoutIssue(
+                slide_index=slide_index,
+                issue_type=IssueType.TEXT_OVERFLOW,
+                severity=IssueSeverity.WARNING,
+                message=(
+                    f'Shape "{box.shape_name}" is text-dense '
+                    f'({required_h_in:.2f}" needed vs {available_h_in:.2f}" available)'
+                ),
+                shape_a=box.shape_name,
+            ))
+
+    # 1. Out-of-bounds check
+    for box, _ in boxes:
+        oob_parts = []
+        if box.left < 0:
+            oob_parts.append('extends left of slide')
+        if box.top < 0:
+            oob_parts.append('extends above slide')
+        if box.right > SLIDE_WIDTH_EMU + OVERLAP_TOLERANCE_EMU:
+            oob_parts.append('extends right of slide')
+        if box.bottom > SLIDE_HEIGHT_EMU + OVERLAP_TOLERANCE_EMU:
+            oob_parts.append('extends below slide')
+        if oob_parts:
+            issues.append(LayoutIssue(
+                slide_index=slide_index,
+                issue_type=IssueType.OUT_OF_BOUNDS,
+                severity=IssueSeverity.WARNING,
+                message=f'Shape "{box.shape_name}" {", ".join(oob_parts)}',
+                shape_a=box.shape_name,
+            ))
+
+    # 2. Overlap check (pairwise)
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            a, shape_a = boxes[i]
+            b, shape_b = boxes[j]
+            if _boxes_overlap(a, b):
+                area = _overlap_area(a, b)
+                # Only flag significant overlaps (> 5% of smaller shape area)
+                smaller_area = min(a.width * a.height, b.width * b.height)
+                if smaller_area > 0 and area / smaller_area > 0.05:
+                    severity = IssueSeverity.ERROR if area / smaller_area > 0.25 else IssueSeverity.WARNING
+
+                    # Downgrade to WARNING when a small non-text shape (icon badge,
+                    # accent rule) overlaps a larger content shape — these are
+                    # intentional decorative overlays, not layout errors.
+                    if severity == IssueSeverity.ERROR:
+                        a_text = _shape_text(shape_a)
+                        b_text = _shape_text(shape_b)
+                        a_area = a.width * a.height
+                        b_area = b.width * b.height
+                        a_is_small_decor = (not a_text and a_area < b_area * 0.35)
+                        b_is_small_decor = (not b_text and b_area < a_area * 0.35)
+                        if a_is_small_decor or b_is_small_decor:
+                            severity = IssueSeverity.WARNING
+
+                    # Fully contained shapes are intentional parent-child
+                    # overlays (e.g., a caption label inside an image frame).
+                    if severity == IssueSeverity.ERROR:
+                        if _is_contained(a, b) or _is_contained(b, a):
+                            severity = IssueSeverity.WARNING
+
+                    issues.append(LayoutIssue(
+                        slide_index=slide_index,
+                        issue_type=IssueType.OVERLAP,
+                        severity=severity,
+                        message=f'Shapes "{a.shape_name}" and "{b.shape_name}" overlap '
+                                f'({area / smaller_area:.0%} of smaller shape)',
+                        shape_a=a.shape_name,
+                        shape_b=b.shape_name,
+                    ))
+
+    # 3. Cramped spacing check (only between non-overlapping nearby shapes)
+    for i in range(len(boxes)):
+        for j in range(i + 1, len(boxes)):
+            a, _ = boxes[i]
+            b, _ = boxes[j]
+            if _boxes_overlap(a, b):
+                continue  # already flagged as overlap
+            # Horizontal gap
+            h_gap = max(b.left - a.right, a.left - b.right)
+            # Vertical gap
+            v_gap = max(b.top - a.bottom, a.top - b.bottom)
+            # Shapes are adjacent if they share a horizontal or vertical band
+            h_overlap = not (a.right <= b.left or b.right <= a.left)
+            v_overlap = not (a.bottom <= b.top or b.bottom <= a.top)
+            if h_overlap and 0 < v_gap < MIN_GAP_EMU:
+                issues.append(LayoutIssue(
+                    slide_index=slide_index,
+                    issue_type=IssueType.CRAMPED,
+                    severity=IssueSeverity.INFO,
+                    message=f'Shapes "{a.shape_name}" and "{b.shape_name}" have only '
+                            f'{v_gap / 914400:.2f}" vertical gap (min {MIN_GAP_EMU / 914400:.2f}")',
+                    shape_a=a.shape_name,
+                    shape_b=b.shape_name,
+                ))
+            if v_overlap and 0 < h_gap < MIN_GAP_EMU:
+                issues.append(LayoutIssue(
+                    slide_index=slide_index,
+                    issue_type=IssueType.CRAMPED,
+                    severity=IssueSeverity.INFO,
+                    message=f'Shapes "{a.shape_name}" and "{b.shape_name}" have only '
+                            f'{h_gap / 914400:.2f}" horizontal gap (min {MIN_GAP_EMU / 914400:.2f}")',
+                    shape_a=a.shape_name,
+                    shape_b=b.shape_name,
+                ))
+
+    return issues
+
+
+def validate_presentation(prs) -> list[LayoutIssue]:
+    """Validate all slides in a presentation."""
+    issues: list[LayoutIssue] = []
+    for idx, slide in enumerate(prs.slides):
+        issues.extend(validate_slide(slide, idx))
+    return issues
+
+
+# ---------------------------------------------------------------------------
+# Auto-correction (kept: auto-size enforcement and OOB clamping only)
+# Overlap resolution is intentionally NOT handled here.
+# ---------------------------------------------------------------------------
+
+def _clamp_shape_to_slide(shape) -> bool:
+    """Clamp a shape so it fits within slide boundaries. Returns True if adjusted."""
+    box = _get_shape_box(shape)
+    if box is None:
+        return False
+    changed = False
+
+    if box.left < 0:
+        shape.left = int(SAFE_MARGIN_EMU)
+        changed = True
+    if box.top < 0:
+        shape.top = int(SAFE_MARGIN_EMU)
+        changed = True
+    if box.right > SLIDE_WIDTH_EMU:
+        new_left = int(SLIDE_WIDTH_EMU - box.width - SAFE_MARGIN_EMU)
+        if new_left >= int(SAFE_MARGIN_EMU):
+            shape.left = new_left
+        else:
+            shape.left = int(SAFE_MARGIN_EMU)
+            shape.width = int(SLIDE_WIDTH_EMU - 2 * SAFE_MARGIN_EMU)
+        changed = True
+    if box.bottom > SLIDE_HEIGHT_EMU:
+        new_top = int(SLIDE_HEIGHT_EMU - box.height - SAFE_MARGIN_EMU)
+        if new_top >= int(SAFE_MARGIN_EMU):
+            shape.top = new_top
+        else:
+            shape.top = int(SAFE_MARGIN_EMU)
+            shape.height = int(SLIDE_HEIGHT_EMU - 2 * SAFE_MARGIN_EMU)
+        changed = True
+
+    return changed
+
+
+def _enforce_auto_size(slide) -> int:
+    """Enable TEXT_TO_FIT_SHAPE auto-size on panel/card shapes only.
+
+    Free textboxes (used for title, key_message, notes) should keep
+    MSO_AUTO_SIZE.NONE because their height is pre-computed by flow_layout_spec.
+    Returns count of fixes.
+    """
+    fixed = 0
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        # Skip free textboxes — they use flow-computed heights
+        # Textboxes have shape_type == MSO_SHAPE_TYPE.TEXT_BOX (17)
+        shape_type = getattr(shape, 'shape_type', None)
+        if shape_type is not None and int(shape_type) == 17:
+            # Ensure word_wrap is on, but do NOT change auto_size
+            shape.text_frame.word_wrap = True
+            continue
+        tf = shape.text_frame
+        tf.word_wrap = True
+        try:
+            current = tf.auto_size
+        except Exception:
+            current = None
+        if current != _TEXT_TO_FIT_SHAPE:
+            tf.auto_size = _TEXT_TO_FIT_SHAPE
+            fixed += 1
+    return fixed
+
+
+def fix_slide(slide, issues: list[LayoutIssue]) -> int:
+    """Apply auto-corrections for a single slide's issues. Returns count of fixes.
+
+    Only handles auto-size enforcement and OOB clamping.
+    Overlap resolution is handled by layout_engine.relayout_presentation().
+    """
+    fixed = 0
+
+    # Fix 0: Enforce auto-size on all text frames
+    fixed += _enforce_auto_size(slide)
+
+    # Fix out-of-bounds
+    for issue in issues:
+        if issue.issue_type == IssueType.OUT_OF_BOUNDS:
+            for shape in slide.shapes:
+                name = getattr(shape, 'name', '') or ''
+                if name == issue.shape_a:
+                    if _clamp_shape_to_slide(shape):
+                        fixed += 1
+                    break
+
+    return fixed
+
+
+def fix_presentation(prs, issues: list[LayoutIssue]) -> int:
+    """Apply auto-corrections across all slides. Returns total fixes applied."""
+    slides_list = list(prs.slides)
+    total_fixed = 0
+
+    by_slide: dict[int, list[LayoutIssue]] = {}
+    for issue in issues:
+        by_slide.setdefault(issue.slide_index, []).append(issue)
+
+    for slide_idx, slide_issues in by_slide.items():
+        if slide_idx < len(slides_list):
+            total_fixed += fix_slide(slides_list[slide_idx], slide_issues)
+
+    return total_fixed
+
+
+def report_issues(issues: list[LayoutIssue]) -> str:
+    """Format issues into a human-readable report."""
+    if not issues:
+        return 'Layout validation passed — no issues found.'
+    lines = [f'Layout validation found {len(issues)} issue(s):']
+    for issue in issues:
+        prefix = {'error': 'ERROR', 'warning': 'WARN', 'info': 'INFO'}[issue.severity.value]
+        lines.append(f'  [{prefix}] Slide {issue.slide_index + 1}: {issue.message}')
+    return '\n'.join(lines)

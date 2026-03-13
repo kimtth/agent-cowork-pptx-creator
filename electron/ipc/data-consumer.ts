@@ -58,7 +58,7 @@ async function runMarkItDown(source: string): Promise<ConversionResult> {
   const { stdout } = await execFileAsync(
     python,
     [scriptPath, '--source', source],
-    { timeout: 120_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+    { timeout: 120_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
   );
 
   const parsed = JSON.parse(stdout) as { ok: boolean; markdown?: string; title?: string; error?: string };

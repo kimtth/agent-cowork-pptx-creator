@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import { SlideNavigator } from './SlideNavigator.tsx'
-import { DataSources } from './DataSources.tsx'
+import { ContextSources } from './ContextSources.tsx'
 import { PalettePanel } from '../palette/PalettePanel.tsx'
 
 type Tab = 'slides' | 'data' | 'palette'
@@ -14,7 +14,7 @@ export function WorkspacePanel() {
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'slides', label: 'Slides' },
-    { id: 'data', label: 'Data' },
+    { id: 'data', label: 'Context' },
     { id: 'palette', label: 'Palette' },
   ]
 
@@ -44,7 +44,7 @@ export function WorkspacePanel() {
       {/* Content */}
       <div className="flex-1 min-h-0 overflow-y-auto border" style={{ borderColor: 'var(--panel-border)', background: 'var(--surface)' }}>
         {tab === 'slides' && <SlideNavigator />}
-        {tab === 'data' && <DataSources />}
+        {tab === 'data' && <ContextSources />}
         {tab === 'palette' && <PalettePanel />}
       </div>
     </div>

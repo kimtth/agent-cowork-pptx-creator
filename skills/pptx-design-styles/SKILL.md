@@ -24,6 +24,10 @@ description: >
 > **Always** read `references/styles.md` before starting.  
 > If the user hasn't chosen a style, use the recommendation matrix below.
 
+### Theme vs. Style Color Conflict
+
+When a design style specifies colors (backgrounds, accents, text) that conflict with the active workspace theme (`PPTX_THEME`), **the theme always wins**. Map the style's color roles to the closest matching theme slot instead of using the style's literal hex values. The style dictates *mood, structure, and visual technique* — the theme dictates *actual colors*.
+
 ---
 
 ## Style Recommendation Matrix

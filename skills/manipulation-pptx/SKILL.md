@@ -73,11 +73,27 @@ Also available at runtime:
 
 - `OUTPUT_PATH`: destination `.pptx` path
 - `PPTX_TITLE`: presentation title
+- `WORKSPACE_DIR`: workspace root directory
+- `IMAGES_DIR`: workspace images directory (`{WORKSPACE_DIR}/images`)
 - `SLIDE_WIDTH_IN`, `SLIDE_HEIGHT_IN`
 - `Presentation`, `Inches`, `Pt`, `RGBColor`, `PP_ALIGN`, `MSO_ANCHOR`, `MSO_AUTO_SHAPE_TYPE`
 - `rgb_color()`, `apply_widescreen()`, `safe_image_path()`, `safe_add_picture()`
+- `resolve_font(text, base_font)` — returns the correct Noto Sans font for non-Latin text
+- `ensure_noto_fonts(text)` — downloads missing Noto Sans fonts (called automatically at startup)
+
+When referencing slide images, prefer `os.path.join(IMAGES_DIR, filename)` over hardcoded absolute paths.
 
 Always prefer these theme values over hardcoded colors.
+
+### Theme vs. Design Style Color Conflict
+
+If a design style skill (e.g., Neo-Brutalism, Cyberpunk Outline) specifies its own color palette, **the active theme always takes priority**. Map the style's color roles to the nearest theme slot:
+
+- Style says "yellow background" but theme BG is `FFFFFF` → use theme BG (`FFFFFF`)
+- Style says "neon green accent" but theme ACCENT1 is `0078D4` → use theme ACCENT1
+- Style says "black text" but theme TEXT is `1B1B1B` → use theme TEXT
+
+The design style defines mood, layout technique, and visual structure. The theme defines the actual colors used in the output.
 
 ## Code Rules
 
@@ -87,7 +103,8 @@ Always prefer these theme values over hardcoded colors.
 4. Save the final deck to `output_path` or `OUTPUT_PATH`.
 5. Do not emit explanations before or after the code block.
 6. Prefer a single `Presentation()` instance with widescreen size via `apply_widescreen(prs)`.
-7. Use grounded local image paths directly when available.
+7. Use grounded local image paths for attached slide images when available.
+8. Use `fetch_icon()` (pre-injected) to add icons to slides — every slide SHOULD include at least one icon.
 
 ## Design Guidelines
 
@@ -101,20 +118,80 @@ Always prefer these theme values over hardcoded colors.
 - Distribute color usage across the full theme whenever possible. Do not let the entire deck collapse to only `ACCENT1` and `ACCENT2` if `ACCENT3`-`ACCENT6` are available.
 - Reuse one or two anchor accents for coherence, but actively bring in the remaining accent colors across cards, stats, dividers, timelines, comparison bands, callouts, and icon frames.
 
-### Icon Usage (Important)
+### Contrast & Readability Safety
 
-Icon or image assets may already exist as grounded local paths from the workspace state. Use those local paths when they are available.
+- Never place white or near-white text on a light background, or dark text on a dark background.
+- Avoid mid-tone text on mid-tone surfaces — maintain strong contrast.
+- If an image sits behind text, add a solid or semi-transparent overlay panel; never place raw text over a busy photo.
+- Body text must be readable at projection distance — avoid anything below 14pt for main content.
+- If a slide looks stylish but forces effort to decode, revise it — choose readability over aesthetics.
 
-Available icons: `arrow-trending-up`, `brain`, `building`, `calendar`, `chart`, `checkmark-circle`, `cloud`, `code`, `data-trending`, `document`, `globe`, `lightbulb`, `link`, `lock-closed`, `money`, `people-team`, `rocket`, `search`, `settings`, `shield`, `sparkle`, `star`, `target`, `warning`
+### Icon Usage (MANDATORY)
 
-**Icon placement rules:**
-- Top-left of cards for visual accent
-- Larger on title slides and section dividers
-- As bullet-prefix replacements for rich impression
-- Prefer icon-card layouts over plain bullet lists
-- When a slide has an icon hint, prefer integrating it into a panel, card, sidebar, or hero visual block instead of dropping it as a tiny corner badge
-- Add shape backgrounds or framing around icons so they feel intentional rather than floating
-- Always prefer grounded local asset paths over invented file paths
+Icons are provided by **Iconify**. The workspace context supplies the icon provider, preferred collection, and available icon names at runtime.
+
+**Every slide MUST include at least one icon.** A deck without icons looks like a wall of text. Icons add visual anchoring, improve scannability, and reinforce the message.
+
+Legacy aliases (e.g., `brain`, `rocket`) are automatically resolved to Iconify IDs (e.g., `mdi:brain`, `mdi:rocket-outline`). The generated code may also use full Iconify IDs from any supported collection (`mdi`, `lucide`, `tabler`, `ph`, `fa6-solid`, `fluent`).
+
+To use an icon in python-pptx, use the pre-injected `fetch_icon()` function, which loads from the local icon cache:
+
+```python
+# fetch_icon is already available in the execution namespace — do NOT redefine it.
+# Usage:
+icon_path = fetch_icon('mdi:chart-line', color_hex='4472C4')
+if icon_path:
+    safe_add_picture(slide.shapes, icon_path, spec.icon_rect.x_emu, spec.icon_rect.y_emu,
+                     width=spec.icon_rect.w_emu, height=spec.icon_rect.h_emu)
+```
+
+**Important:** `fetch_icon(name, color_hex, size)` is pre-injected into the execution namespace. Do NOT redefine it. It checks the local icon cache (`ICON_CACHE_DIR`) and returns `None` if the requested icon is unavailable.
+
+**Icon enforcement rules:**
+- **Every slide MUST call `fetch_icon()` at least once** to add a visual icon
+- Title slide: place a prominent icon in the hero zone or as a visual anchor (1.5–2.5 in)
+- Section/diagram slides: icon should be 1.2–1.8 in, placed in sidebar or icon_rect
+- Cards/bullets slides: place one thematic icon per slide in the sidebar or icon_rect area
+- Stats slides: place an icon representing the metric theme
+- Summary slides: place a concluding icon in the summary box or as an accent
+- Choose icons that reinforce the slide's topic (e.g., `mdi:chart-line` for analytics, `mdi:shield-check` for security)
+- Color icons using theme accent colors (pass `color_hex=colors['accent4']` etc.)
+- If `spec.icon_rect` is available, use it; otherwise place the icon in an appropriate zone
+
+Example for every slide:
+```python
+# MANDATORY: add an icon to every slide
+icon_path = fetch_icon('mdi:database', color_hex=colors['accent4'])
+if icon_path:
+    if spec.icon_rect:
+        safe_add_picture(slide.shapes, icon_path,
+            Inches(spec.icon_rect.x), Inches(spec.icon_rect.y),
+            width=Inches(spec.icon_rect.w), height=Inches(spec.icon_rect.h))
+    else:
+        # Place in upper-right or sidebar when no icon_rect is defined
+        safe_add_picture(slide.shapes, icon_path,
+            Inches(10.5), Inches(0.5), width=Inches(1.8), height=Inches(1.8))
+```
+
+### Text Overflow Prevention (Critical)
+
+**Free textboxes** (created by `add_textbox` or `shapes.add_textbox`) must use `MSO_AUTO_SIZE.NONE` — NOT `TEXT_TO_FIT_SHAPE`. The `flow_layout_spec()` system already computes correct heights for title and key_message rects based on the actual text content and font size. Using `TEXT_TO_FIT_SHAPE` on textboxes causes PowerPoint to shrink fonts unpredictably, creating visual mismatches where the key_message overlaps the title.
+
+**Panel shapes** (rounded rectangles, cards) should use `MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE` because their height is fixed and text must fit inside.
+
+```python
+# ✅ CORRECT: free textbox with flow-computed height
+tf = box.text_frame
+tf.word_wrap = True
+tf.auto_size = MSO_AUTO_SIZE.NONE  # height is already correct from flow_layout_spec
+
+# ✅ CORRECT: panel/card shape
+tf = panel.text_frame
+tf.word_wrap = True
+tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE  # shrink text to fit fixed shape
+```
+
+**Rule:** For textboxes placed using `flow_layout_spec` rects (title, key_message, notes), always use `MSO_AUTO_SIZE.NONE`. For panels/cards with fixed dimensions, use `TEXT_TO_FIT_SHAPE`.
 
 ### Layout Principles
 
@@ -131,7 +208,99 @@ Available icons: `arrow-trending-up`, `brain`, `building`, `calendar`, `chart`, 
 - Do not shrink the whole slide to fit more text. Recompose the layout instead.
 - Avoid repeating the same tiny icon placement at the top edge of slides. Repeated `x < 1.2`, `y < 1.2`, `w <= 0.6`, `h <= 0.6` icon placement is usually a poor layout.
 - On `title`, `section`, `diagram`, and `comparison` slides, reserve a meaningful visual area instead of making the slide text-only.
+- Do not stack shapes at `y=0` or bunch everything in the top 2 inches of the slide.
+- No two content shapes should share overlapping `(x, x+w)` AND `(y, y+h)` ranges.
+- When using `notes_rect` from the spec, always create the notes text box with `name = "notes_body"` so the layout repair engine skips it.
+- Do not place body/content shapes at Y positions that could overlap the notes zone (`spec.notes_rect.y` onwards). Reserve the bottom region.
+
+### Layout Template System
+
+The runtime provides `get_layout_spec(layout_type, has_icon=False)` which returns pre-computed safe coordinates for every zone on every layout type. **Never use literal float coordinates. Every x, y, w, h must reference a `spec.*` field or be computed relative to one.**
+
+Available on `LayoutSpec`: `title_rect`, `key_message_rect`, `accent_rect`, `icon_rect`, `content_rect`, `notes_rect`, `summary_box`, `hero_rect`, `chips_rect`, `footer_rect`, `sidebar_rect`, `max_items`, `row_step`, `cards`, `stats`, `timeline`, `comparison`.
+
+For text-heavy slides, compute a flow-adjusted spec so text regions cascade in display order:
+
+```python
+base_spec = get_layout_spec('bullets', has_icon=bool(slide_icon))
+spec = flow_layout_spec(
+    base_spec,
+    title_text=slide_title,
+    key_message_text=slide_key_message,
+    title_font_pt=30,
+    key_font_pt=18,
+)
+```
+
+`flow_layout_spec()` expands title/key-message areas based on estimated text height, then pushes ALL lower zones (content, cards, stats, hero, chips, footer, sidebar) down automatically.
+
+#### Mandatory: No Hardcoded Coordinates
+
+**HARD RULE:** Do NOT write literal positioning like `hero_x = 8.85` or `chip_y = 4.85`. Instead, derive positions from spec rects:
+
+```python
+# ✅ CORRECT: derive from spec
+hero = spec.hero_rect
+chip_area = spec.chips_rect
+footer = spec.footer_rect
+body_y = spec.content_rect.y
+sidebar = spec.sidebar_rect
+
+# ❌ WRONG: hardcoded coordinates
+hero_x = 8.85  # NEVER
+chip_y = 4.85  # NEVER
+body_y = 5.52  # NEVER
+```
+
+When you need a sub-position within a spec rect, compute it:
+
+```python
+# Inside content_rect, place 3 rows
+for idx in range(3):
+    row_y = spec.content_rect.y + idx * (row_h + gap)
+
+# Icon inside hero_rect
+icon_x = spec.hero_rect.x + 0.2
+icon_y = spec.hero_rect.y + 0.3
+
+# Chips at spec.chips_rect
+for idx, text in enumerate(chip_texts):
+    cx = spec.chips_rect.x + idx * (chip_w + gap)
+    cy = spec.chips_rect.y
+```
+
+#### Sub-Zone Reference
+
+| Layout   | hero_rect  | chips_rect | footer_rect | sidebar_rect |
+| -------- | ---------- | ---------- | ----------- | ------------ |
+| title    | Right-side hero panel | Horizontal label chips | Body text below chips | — |
+| agenda   | —          | —          | —           | Right-side decoration |
+| stats    | —          | —          | Bottom summary bar | — |
+| diagram  | —          | —          | —           | Right-side callout area |
+| others   | —          | —          | —           | — |
+
+All sub-zones cascade automatically via `flow_layout_spec()` when title text wraps.
+
+There is no runtime geometry repair pass. The generated code must produce the final layout directly: reserve notes/footer space, keep aligned layouts aligned, and split or simplify content instead of relying on any post-processing fix-up.
 - Prefer 3-5 bullets per slide. If content is denser than that, convert it into two-column cards, stats, or a comparison structure.
+- **Maximum 5 content shapes per slide** (excluding slide title, key message, accent bar, and notes/footer). If more are needed, split the content across two slides or collapse items into a grid/card layout.
+- **`flow_layout_spec()` is mandatory** whenever the slide title text is longer than 60 characters. Using the static `get_layout_spec()` on long-title slides produces fixed Y coordinates that overlap auto-sized title text.
+- **Notes and footer shapes must be named with a `notes_` or `footer_` prefix** (e.g., `notes_body`, `footer_citation`). The layout engine skips these shapes entirely so they are never repositioned. Always place notes/footer shapes last in the slide-building code.
+- **Preserve alignment intentionally.** If a slide uses a grid, mirrored comparison, stacked sidebar, or evenly aligned cards, do not introduce compensating offsets per box. Reduce content instead of breaking the alignment system.
+- **Reserve `notes_rect` as a hard boundary.** No content shape may start at or extend into `spec.notes_rect.y` or below.
+- **Height-budget every text box before placement.** Use `estimate_text_height_in()` for body copy, card copy, sidebars, and summary panels before you finalize `h`.
+- **Do not place paragraph text into shallow boxes.** A text box with 2+ lines of body copy should usually be at least `0.95in` tall. A card with a title plus paragraph body should usually be at least `1.45in` tall.
+- **Treat 85% text fill as the danger zone.** If estimated text height uses more than ~85% of a box height, the slide is too dense. Reduce content or split the slide.
+- **For stacked rows, prefer fewer rows with taller boxes.** Four readable rows are better than six compressed rows.
+
+Example height budgeting:
+
+```python
+needed_h = estimate_text_height_in(body_text, target_rect.w - 0.25, 16) + 0.12
+body_h = max(target_rect.h, needed_h)
+```
+
+If the computed height no longer fits cleanly on the slide, reduce the number of elements or split the content. Do not keep the same number of boxes and rely on auto-size to shrink away the problem.
 
 ### Visual Sizing Rules
 
@@ -144,18 +313,37 @@ Available icons: `arrow-trending-up`, `brain`, `building`, `calendar`, `chart`, 
 
 ### Font Sizes
 
-| Usage              | Size    | Weight  |
-| ------------------ | ------- | ------- |
-| Slide title        | 28–32pt | Bold    |
-| Section title      | 36–44pt | Bold    |
-| Body text          | 16–20pt | Regular |
-| Bullet points      | 16–18pt | Regular |
-| Card body text     | 14–16pt | Regular |
-| Card title         | 15–17pt | Bold    |
-| Stats number       | 32–48pt | Bold    |
-| Caption            | 11–12pt | Regular |
-| Header band text   | 9–10pt  | Regular |
-| Footer             | 8pt     | Regular |
+The font size table below is a **starting guide only**. Always enable auto-size on text frames so PowerPoint shrinks text to fit the shape when content is longer than expected. Never rely on a fixed font size if it would cause text to overflow or overlap.
+
+```python
+# REQUIRED: Enable auto-size appropriately
+# For free textboxes (title, key_message):
+tf = txBox.text_frame
+tf.word_wrap = True
+tf.auto_size = MSO_AUTO_SIZE.NONE  # flow_layout_spec computed the height
+
+# For panel/card shapes:
+tf = panel.text_frame
+tf.word_wrap = True
+tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE  # shrink to fit fixed shape
+```
+
+| Usage              | Initial Size | Weight  | Auto-size |
+| ------------------ | ------------ | ------- | --------- |
+| Slide title        | 28–32pt      | Bold    | Required  |
+| Section title      | 36–44pt      | Bold    | Required  |
+| Body text          | 16–20pt      | Regular | Required  |
+| Bullet points      | 16–18pt      | Regular | Required  |
+| Card body text     | 14–16pt      | Regular | Required  |
+| Card title         | 15–17pt      | Bold    | Required  |
+| Stats number       | 32–48pt      | Bold    | Required  |
+| Caption            | 11–12pt      | Regular | Required  |
+| Header band text   | 9–10pt       | Regular | Required  |
+| Footer             | 8pt          | Regular | Required  |
+
+**Rule:** For free textboxes (title, key_message, notes), set `text_frame.auto_size = MSO_AUTO_SIZE.NONE` and rely on the flow-computed height from `flow_layout_spec()`. For panel/card shapes, set `text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE`. This prevents the primary text-overlap bug where titles and key_messages visually collide.
+
+**Order rule:** Text layout is display-order driven. Measure/reserve title space first, then key message, then start the body/content zone below them. Do not place body panels at a fixed Y coordinate when the title can wrap.
 
 ## Execution Template
 
@@ -167,6 +355,29 @@ def build_presentation(output_path, theme, title):
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = rgb_color(theme.get('BG'), 'FFFFFF')
+
+    # Use flow_layout_spec for text placement
+    spec = flow_layout_spec(
+        get_layout_spec('bullets', has_icon=True),
+        title_text='Your slide title',
+        key_message_text='Key message text',
+        title_font_pt=28,
+        key_font_pt=15,
+    )
+    txBox = slide.shapes.add_textbox(
+        Inches(spec.title_rect.x), Inches(spec.title_rect.y),
+        Inches(spec.title_rect.w), Inches(spec.title_rect.h))
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    tf.auto_size = MSO_AUTO_SIZE.NONE  # height is from flow_layout_spec
+
+    # MANDATORY: add icon
+    icon_path = fetch_icon('mdi:brain', color_hex=theme.get('ACCENT1', '0078D4'))
+    if icon_path and spec.icon_rect:
+        safe_add_picture(slide.shapes, icon_path,
+            Inches(spec.icon_rect.x), Inches(spec.icon_rect.y),
+            width=Inches(spec.icon_rect.w), height=Inches(spec.icon_rect.h))
+
     prs.save(output_path)
 ```
 
@@ -187,6 +398,22 @@ def build_presentation(output_path, theme, title):
 - Match the user's language for all slide content
 - Append original terms for jargon (e.g., "Retrieval-Augmented Generation (RAG)")
 
+### Font Selection for Non-English Content
+
+Use `resolve_font(text, base_font)` to automatically select the correct font for CJK and other non-Latin text. This function is pre-injected into the execution namespace.
+
+```python
+# resolve_font detects script and returns the appropriate Noto Sans variant
+font = resolve_font(slide_data['title'], 'Calibri')  # → 'Noto Sans JP' for Japanese
+run.font.name = font
+```
+
+**Rules:**
+- For non-English body text, always use `resolve_font(text, base_font)` instead of hardcoding font names like `Yu Mincho`
+- Display/title fonts (Georgia, Bebas Neue, etc.) may be kept for Latin text, but pass CJK text through `resolve_font()`
+- Monospace labels (Consolas, Space Mono) are fine for Latin-only labels and numbers
+- Noto Sans fonts are auto-downloaded to workspace if not installed — no manual setup needed
+
 ## Quality Checklist
 
 - [ ] Output is a complete `python-pptx` code block
@@ -195,6 +422,9 @@ def build_presentation(output_path, theme, title):
 - [ ] Main body text is not below 14pt except for captions/footer-like metadata
 - [ ] Icons/images are not all tiny badges clustered at the top edge of slides
 - [ ] Key slides (`title`, `section`, `diagram`, `comparison`) use deliberate visual composition, not just stacked text
+- [ ] Every slide calls `fetch_icon()` at least once to add a visual icon
+- [ ] Free textboxes (title, key_message) use `MSO_AUTO_SIZE.NONE`, panels use `TEXT_TO_FIT_SHAPE`
+- [ ] No title/key_message text overlap — `flow_layout_spec()` is used for every slide with title > 60 chars
 
 ## Workflow
 
@@ -206,131 +436,35 @@ def build_presentation(output_path, theme, title):
 
 ---
 
-## python-pptx API Reference
+## Layout Infrastructure Tools
 
-### Presentation Structure
+When PPTX generation fails with layout validation errors (overlap, text overflow, out-of-bounds), you have two tools to fix the underlying layout infrastructure and re-run without regenerating the entire code.
 
-```
-Presentation
-├── slide_layouts (predefined layouts)
-├── slides (individual slides)
-│   ├── shapes (text, images, charts)
-│   │   ├── text_frame (paragraphs)
-│   │   └── table (rows, cells)
-│   └── placeholders (title, content)
-└── slide_masters (templates)
-```
+### `patch_layout_infrastructure`
 
-### Slide Layouts
+Read or patch `layout_specs.py` (pre-computed layout coordinates) or `layout_validator.py` (validation rules).
 
-```python
-# Common layout indices (may vary by template)
-TITLE_SLIDE = 0
-TITLE_CONTENT = 1
-SECTION_HEADER = 2
-TWO_CONTENT = 3
-COMPARISON = 4
-TITLE_ONLY = 5
-BLANK = 6
+**Parameters:**
+- `action`: `"read"` to view the file, `"patch"` to search-and-replace
+- `file`: `"layout_specs"` or `"layout_validator"`
+- `search` (patch only): exact string to find
+- `replace` (patch only): replacement string
 
-slide_layout = prs.slide_layouts[BLANK]
-slide = prs.slides.add_slide(slide_layout)
-```
+**Workflow:**
+1. Read the file to understand current values: `patch_layout_infrastructure(action="read", file="layout_specs")`
+2. Identify the dimension or threshold causing the error
+3. Patch it: `patch_layout_infrastructure(action="patch", file="layout_specs", search="card_w_val = 5.9", replace="card_w_val = 4.5")`
+4. Re-run with `rerun_pptx`
 
-### Adding Text
+**Common fixes:**
+- **Overlap errors**: Adjust content widths in `get_layout_spec()` — e.g., reduce card/stats/comparison widths when `has_icon=True`
+- **Text overflow errors**: Increase box heights or adjust validator thresholds in `layout_validator.py`
+- **Out-of-bounds errors**: Reduce x+w or y+h values so shapes stay within 13.33" × 7.5"
 
-```python
-# Text box
-txBox = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(4), Inches(1))
-tf = txBox.text_frame
-p = tf.paragraphs[0]
-p.text = "Custom text box"
-p.font.bold = True
-p.font.size = Pt(18)
+### `rerun_pptx`
 
-# Additional paragraphs with indentation
-p = tf.add_paragraph()
-p.text = "Sub-bullet"
-p.level = 1
-```
+Re-execute the last generated python-pptx code (`generated-source.py`) with the same theme and title. Use after `patch_layout_infrastructure` to verify the fix.
 
-### Shapes
+**Parameters:** none
 
-```python
-from pptx.enum.shapes import MSO_SHAPE
-
-shape = slide.shapes.add_shape(
-    MSO_SHAPE.RECTANGLE,
-    Inches(1), Inches(2),
-    Inches(3), Inches(1.5)
-)
-shape.text = "Rectangle with text"
-
-# Fill and line
-shape.fill.solid()
-shape.fill.fore_color.rgb = RGBColor(0x00, 0x80, 0x00)
-shape.line.color.rgb = RGBColor(0x00, 0x00, 0x00)
-shape.line.width = Pt(2)
-```
-
-### Images
-
-```python
-slide.shapes.add_picture(
-    'image.png',
-    Inches(1), Inches(2),
-    width=Inches(4)  # height auto-calculated
-)
-```
-
-### Tables
-
-```python
-rows, cols = 4, 3
-table = slide.shapes.add_table(
-    rows, cols,
-    Inches(1), Inches(2), Inches(8), Inches(2)
-).table
-
-table.columns[0].width = Inches(2)
-table.cell(0, 0).text = "Header"
-table.cell(0, 0).text_frame.paragraphs[0].font.bold = True
-```
-
-### Charts
-
-```python
-from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE
-
-chart_data = CategoryChartData()
-chart_data.categories = ['Q1', 'Q2', 'Q3', 'Q4']
-chart_data.add_series('Sales', (19.2, 21.4, 16.7, 23.8))
-
-chart = slide.shapes.add_chart(
-    XL_CHART_TYPE.COLUMN_CLUSTERED,
-    Inches(1), Inches(2), Inches(8), Inches(4),
-    chart_data
-).chart
-
-chart.has_legend = True
-```
-
-### Text Formatting
-
-```python
-run = p.runs[0]
-run.font.name = 'Arial'
-run.font.size = Pt(24)
-run.font.bold = True
-run.font.color.rgb = RGBColor(0x00, 0x66, 0xCC)
-
-p.alignment = PP_ALIGN.CENTER  # LEFT, RIGHT, JUSTIFY
-```
-
-### Limitations
-
-- No complex animations or transitions
-- Limited SmartArt support
-- No video embedding via python-pptx API
-- Chart types limited to standard Office charts
+**Returns:** success message or the validation error report if the fix didn't resolve the issue.

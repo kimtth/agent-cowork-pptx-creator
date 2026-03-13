@@ -6,13 +6,14 @@ interface Props {
   scale?: number
   onClick?: () => void
   selected?: boolean
+  cacheKey?: string | number
 }
 
 const SLIDE_W = 13.33 * 96
 const SLIDE_H = 7.5 * 96
 
-export function PptxPreviewCard({ title, imagePath, scale = 1, onClick, selected }: Props) {
-  const src = toLocalImageUrl(imagePath)
+export function PptxPreviewCard({ title, imagePath, scale = 1, onClick, selected, cacheKey }: Props) {
+  const src = toLocalImageUrl(imagePath, cacheKey)
 
   return (
     <div

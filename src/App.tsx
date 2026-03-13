@@ -34,9 +34,10 @@ export default function App() {
         useSlidesStore.getState().setFramework(payload.primary as FrameworkType)
       }),
       api.chat.onDone(() => {
-        const pendingContent = useChatStore.getState().pendingContent
-        // Flush immediately so the message is visible, then defer regex to keep UI responsive
+        // Flush buffered deltas first, then capture the complete content
         useChatStore.getState().flushAssistantMessage()
+        const lastMessage = useChatStore.getState().messages.at(-1)
+        const pendingContent = lastMessage?.role === 'assistant' ? lastMessage.content : ''
         useSlidesStore.getState().setStreaming(false)
 
         requestAnimationFrame(() => {

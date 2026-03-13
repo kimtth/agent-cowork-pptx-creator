@@ -37,9 +37,9 @@ export async function getSessionOptions(opts?: {
   const useAzureOpenAI = Boolean(endpoint);
   const useGitHubModels = !useAzureOpenAI && (!provider || provider === 'openai' || provider === 'github');
 
-  if (!provider && !modelName && !useAzureOpenAI) return { streaming };
+  if (!provider && !modelName && !useAzureOpenAI) return { streaming, reasoningEffort: 'medium' };
   if (useGitHubModels) {
-    return { ...(modelName ? { model: modelName } : {}), streaming };
+    return { ...(modelName ? { model: modelName } : {}), streaming, reasoningEffort: 'medium' };
   }
 
   if (useAzureOpenAI) {
@@ -63,6 +63,7 @@ export async function getSessionOptions(opts?: {
     return {
       model: modelName,
       streaming,
+      reasoningEffort: 'medium',
       provider: {
         type: 'openai',
         baseUrl: endpoint.replace(/\/$/, ''),

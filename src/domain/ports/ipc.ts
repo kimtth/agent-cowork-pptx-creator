@@ -45,7 +45,7 @@ export interface ImageSearchRequest {
 
 export interface ImageSearchCandidate {
   id: string;
-  provider: 'direct' | 'google';
+  provider: 'direct' | 'google' | 'bing';
   searchQuery: string | null;
   title: string | null;
   imageUrl: string | null;
@@ -113,12 +113,15 @@ export interface IpcPptxAPI {
     code: string,
     themeTokens: ThemeTokens | null,
     title: string,
+    iconCollection?: string,
   ): Promise<{ success: boolean; path?: string; error?: string }>;
   renderPreview(
     code: string,
     themeTokens: ThemeTokens | null,
     title: string,
+    iconCollection?: string,
   ): Promise<{ success: boolean; imagePaths?: string[]; error?: string; warning?: string }>;
+  readExistingPreviews(): Promise<{ success: boolean; imagePaths: string[] }>;
 }
 
 export interface IpcFsAPI {

@@ -95,5 +95,5 @@ The center preview panel renders local slide images from the generated PPTX.
 Repository-level Copilot workflow instructions live under [workflows/prestaging.md](workflows/prestaging.md) and [workflows/create-pptx.md](workflows/create-pptx.md).
 
 - `prestaging.md` defines the planning workflow for understanding content, selecting a framework, and staging slide definitions.
-- `create-pptx.md` defines the final PPTX workflow, including mandatory `slide-final-review` before python-pptx generation.
+- `create-pptx.md` defines the final PPTX workflow with automated layout validation and infrastructure patching tools.
 - `electron/ipc/copilot-runtime.ts` defines the root workflow instruction path used by the app when building Copilot prompts.

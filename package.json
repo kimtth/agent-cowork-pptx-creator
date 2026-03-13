@@ -19,6 +19,8 @@
     "@github/copilot-sdk": "^0.1.32",
     "@github/copilot-win32-x64": "1.0.3",
     "@iconify/react": "^6.0.2",
+    "adm-zip": "^0.5.16",
+    "archiver": "^7.0.1",
     "cheerio": "^1.2.0",
     "csv-parse": "^6.1.0",
     "jszip": "^3.10.1",
@@ -38,7 +40,10 @@
     ]
   },
   "devDependencies": {
+    "@iconify/json": "^2.2.449",
     "@tailwindcss/vite": "^4.2.1",
+    "@types/adm-zip": "^0.5.7",
+    "@types/archiver": "^7.0.0",
     "@types/node": "^25.4.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

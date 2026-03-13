@@ -44,12 +44,19 @@ export function historyToIpc(messages: ChatMessage[]): Array<{ role: 'user' | 'a
   return messages.slice(-20).map(({ role, content }) => ({ role, content }));
 }
 
+function isSupportedPythonFenceInfo(info: string): boolean {
+  if (!info) return true
+  const normalized = info.trim().toLowerCase()
+  return normalized === 'python' || normalized === 'py'
+}
+
 export function extractPptxCodeBlock(content: string): string | null {
-  const blocks = [...content.matchAll(/```(?:(python|py))?\s*([\s\S]*?)```/ig)]
+  const blocks = [...content.matchAll(/```([^\r\n`]*)[ \t]*\r?\n([\s\S]*?)```/g)]
+    .filter((match) => isSupportedPythonFenceInfo(match[1] ?? ''))
   if (blocks.length === 0) return null
 
   const preferred = blocks.find((match) => {
-    const language = (match[1] ?? '').toLowerCase()
+    const language = (match[1] ?? '').trim().toLowerCase()
     return language === 'python' || language === 'py'
   }) ?? blocks.find((match) => looksLikePythonPptxCode(match[2] ?? ''))
 
