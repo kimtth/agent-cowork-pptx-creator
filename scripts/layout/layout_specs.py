@@ -411,6 +411,7 @@ def get_layout_spec(layout_type: str, has_icon: bool = False) -> LayoutSpec:
             key_message_rect=_header_rect(0.5, 1.86, 7.3, 0.46),
             accent_rect=RectSpec(0.5, 0.78, 0.9, 0.06),
             icon_rect=_icon_corner_rect(2.35),
+            content_rect=RectSpec(0.5, 2.50, 7.85, 2.0),
             hero_rect=RectSpec(8.85, 1.20, 3.65, 3.65),
             chips_rect=RectSpec(0.5, 4.55, 7.85, 0.46),
             footer_rect=RectSpec(0.5, 5.22, 7.85, 0.70),
@@ -425,6 +426,7 @@ def get_layout_spec(layout_type: str, has_icon: bool = False) -> LayoutSpec:
             key_message_rect=_header_rect(0.9, 2.58, 8.9, 0.68),
             accent_rect=RectSpec(0.9, 1.68, 0.9, 0.05),
             icon_rect=_icon_corner_rect(1.6),
+            content_rect=RectSpec(0.9, 3.40, 8.9, 2.40),
             notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
             max_items=0,
         )
@@ -458,11 +460,11 @@ def get_layout_spec(layout_type: str, has_icon: bool = False) -> LayoutSpec:
             cards=CardsSpec(
                 columns=2,
                 card_w=card_w_val,
-                card_h=1.28,
+                card_h=1.42,
                 start_x=0.5,
                 start_y=1.86,
                 gap_x=0.32,
-                gap_y=0.22,
+                gap_y=0.18,
             ),
         )
 
@@ -500,12 +502,12 @@ def get_layout_spec(layout_type: str, has_icon: bool = False) -> LayoutSpec:
             key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
             accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
             icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-            content_rect=RectSpec(0.5, 1.95, cw, 3.1),
+            content_rect=RectSpec(0.5, 1.95, cw, 3.45),
             notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
             max_items=6,
             comparison=ComparisonSpec(
-                left=RectSpec(0.5, 1.95, half_w, 3.1),
-                right=RectSpec(right_x, 1.95, half_w, 3.1),
+                left=RectSpec(0.5, 1.95, half_w, 3.45),
+                right=RectSpec(right_x, 1.95, half_w, 3.45),
             ),
         )
 
@@ -558,6 +560,20 @@ def get_layout_spec(layout_type: str, has_icon: bool = False) -> LayoutSpec:
             sidebar_rect=RectSpec(9.5, 1.86, 3.33, 3.3),
             notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
             max_items=5,
+        )
+
+    if lt == 'chart':
+        tw = 9.1 if has_icon else 12.33
+        return LayoutSpec(
+            layout_type=lt,
+            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
+            key_message_rect=_header_rect(0.5, 1.02, tw, 0.40),
+            accent_rect=RectSpec(0.5, 1.46, 1.5, 0.04),
+            icon_rect=_icon_corner_rect(1.6) if has_icon else None,
+            content_rect=RectSpec(0.5, 1.62, 12.33, 4.2),
+            footer_rect=RectSpec(0.5, 5.90, 12.33, 0.22),
+            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
+            max_items=1,
         )
 
     # bullets (default)

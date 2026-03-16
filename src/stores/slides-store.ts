@@ -56,7 +56,7 @@ function syncPrimaryImage(slide: SlideItem, selectedImages: SlideSelectedImage[]
 }
 
 function mapLayout(raw: string): SlideItem['layout'] {
-  const valid = ['title', 'agenda', 'section', 'bullets', 'cards', 'stats', 'comparison', 'timeline', 'diagram', 'summary'] as const;
+  const valid = ['title', 'agenda', 'section', 'bullets', 'cards', 'stats', 'comparison', 'timeline', 'diagram', 'summary', 'chart'] as const;
   return valid.includes(raw as SlideItem['layout']) ? (raw as SlideItem['layout']) : 'bullets';
 }
 
@@ -168,7 +168,13 @@ export const useSlidesStore = create<SlidesStore>()(persist(
           const resolved = images.filter((item) => item.number === slide.number)
           if (resolved.length === 0) return slide
 
-          return syncPrimaryImage(slide, resolved.map((image) => toSelectedImage(image)))
+          const newImages = resolved.map((image) => toSelectedImage(image))
+          const existingIds = new Set(slide.selectedImages.map((img) => img.id))
+          const merged = [
+            ...slide.selectedImages,
+            ...newImages.filter((img) => !existingIds.has(img.id)),
+          ]
+          return syncPrimaryImage(slide, merged)
         }),
       },
     }));

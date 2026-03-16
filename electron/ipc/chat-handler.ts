@@ -9,7 +9,7 @@
 import { ipcMain } from 'electron';
 import type { BrowserWindow } from 'electron';
 import fs from 'fs/promises';
-import { readdirSync, existsSync as fsExistsSync } from 'fs';
+import { existsSync as fsExistsSync } from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { onSettingsSaved } from './settings-handler.ts';
@@ -25,35 +25,14 @@ import type {
   SlideUpdatePayload,
 } from '../../src/domain/entities/slide-work';
 import type { DataFile, ScrapeResult } from '../../src/domain/ports/ipc';
-import { getAvailableIconChoices } from '../../src/domain/icons/iconify';
+import { getIconifyCollectionById } from '../../src/domain/icons/iconify';
 import type { IconifyCollectionId } from '../../src/domain/icons/iconify';
 import { formatWorkflowForPrompt, getWorkflowConfig, type WorkflowConfig } from '../../src/domain/workflows/workflow-config';
-import { executeGeneratedPythonCodeToFile, formatExecutionFailure, computeLayoutSpecs } from './pptx-handler.ts';
+import { executeGeneratedPythonCodeToFile, formatExecutionFailure, computeLayoutSpecs, persistLayoutInputToWorkspace, persistSlideAssetsToWorkspace } from './pptx-handler.ts';
+import { buildManagedSystemPrompt } from './system-prompts.ts';
 import { readWorkspaceDir } from './workspace-utils.ts';
 
 const CHAT_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
-
-/** Read all cached icon filenames from the local PNG cache directory. */
-function readCachedIconNames(collectionId: string): string[] {
-  let cacheRoot = path.join(app.getAppPath(), 'skills', 'iconfy-list', 'cache');
-  if (!fsExistsSync(cacheRoot)) {
-    cacheRoot = path.join(process.cwd(), 'skills', 'iconfy-list', 'cache');
-  }
-  const collections = collectionId === 'all'
-    ? ['mdi', 'lucide', 'tabler', 'ph', 'fa6-solid', 'fluent']
-    : [collectionId];
-  const names: string[] = [];
-  for (const col of collections) {
-    const dir = path.join(cacheRoot, col);
-    if (!fsExistsSync(dir)) continue;
-    try {
-      for (const file of readdirSync(dir)) {
-        if (file.endsWith('.png')) names.push(`${col}:${file.slice(0, -4)}`);
-      }
-    } catch { /* ignore */ }
-  }
-  return names;
-}
 
 type ActiveChatRequest = {
   cancel: (reason?: string) => void;
@@ -222,17 +201,6 @@ async function readDesignStyleBlock(styleName: string): Promise<string | null> {
   return null;
 }
 
-/** Sample N evenly-spaced icon names from the full list for prompt brevity. */
-function sampleIconNames(names: string[], count: number): string[] {
-  if (names.length <= count) return names;
-  const step = names.length / count;
-  const sampled: string[] = [];
-  for (let i = 0; i < count; i++) {
-    sampled.push(names[Math.floor(i * step)]);
-  }
-  return sampled;
-}
-
 async function formatFileSource(ds: DataFile): Promise<string[]> {
   const parts = [`- **${ds.name}** (${ds.type.toUpperCase()}): ${ds.summary}`];
   if (ds.consumed) {
@@ -332,6 +300,7 @@ async function buildPrompt(
         const primaryImagePath = primaryImage?.imagePath ?? s.imagePath ?? null;
 
         if (primaryImagePath) imgParts.push(`imagePath: ${primaryImagePath}`);
+        if ((s.imageQueries ?? []).length > 0) imgParts.push(`imageQueries: ${(s.imageQueries ?? []).join(' | ')}`);
         if (selectedImages.length > 0) {
           for (let idx = 0; idx < selectedImages.length; idx++) {
             const img = selectedImages[idx];
@@ -343,6 +312,7 @@ async function buildPrompt(
         parts.push(`     keyMessage: ${s.keyMessage}`);
         if (s.bullets.length > 0) parts.push(`     bullets: ${s.bullets.join(' | ')}`);
         if (s.icon) parts.push(`     icon: ${s.icon}`);
+        parts.push(`     requiredIconCollection: ${workspace.iconCollection}`);
         if (imgParts.length > 0) parts.push(`     ${imgParts.join('; ')}`);
       }
     }
@@ -399,7 +369,7 @@ async function buildPrompt(
     if (workspace.theme.colors.length > 0) {
       parts.push(`Palette colors: ${workspace.theme.colors.slice(0, 20).map((color) => `${color.name} ${color.hex}`).join(' | ')}`);
     }
-    parts.push('Use the OOXML slot hex values as color constants in python-pptx code when generating slides.');
+    parts.push('Use the OOXML slot hex values as color constants in python-pptx code when generating slides. Readability is mandatory: use theme colors first, and when text sits on any colored or image background, call ensure_contrast(fg_hex, bg_hex). If style conflicts with readability, readability wins.');
     parts.push('');
   }
 
@@ -438,16 +408,15 @@ async function buildPrompt(
   }
 
   {
-    const cachedIcons = readCachedIconNames('all');
-    if (cachedIcons.length > 0) {
-      parts.push('## Available Icons (locally cached)\n');
-      parts.push(`Icon provider: ${workspace.iconProvider}`);
-      parts.push(`Preferred icon set: ${workspace.iconCollection}`);
-      parts.push(`Total icons available: ${cachedIcons.length}`);
-      parts.push('ONLY use icon names from the exact list below — do NOT invent or guess icon names. fetch_icon() will return None for any name not in this list.');
-      parts.push(cachedIcons.join(', '));
-      parts.push('');
+    const collection = getIconifyCollectionById(workspace.iconCollection);
+    parts.push('## Icon Constraints\n');
+    parts.push(`Icon provider: ${workspace.iconProvider}`);
+    parts.push(`Preferred icon set: ${collection.label} (${collection.id})`);
+    if (workspace.availableIcons.length > 0) {
+      parts.push(`Approved icon hints currently attached to the workspace: ${workspace.availableIcons.length}`);
     }
+    parts.push('Use explicit Iconify IDs only. Prefer icon names already attached to slides or provided by slide_assets(slide_index). Do not invent icon names, and do not use icons outside the selected collection because fetch_icon() enforces that constraint at runtime.');
+    parts.push('');
   }
 
   parts.push(`## User Message\n${message}`);
@@ -501,26 +470,26 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
       // Uses PowerPoint COM AutoFit + kiwisolver constraint solver to produce
       // pixel-perfect coordinates injected into the Python runner env.
       let layoutSpecsJson: string | undefined;
+      let layoutSpecsPromise: Promise<void> | null = null;
+      let slideAssetsPromise: Promise<void> | null = null;
       const workflow = resolveWorkflow(message, workspace);
       if (mode === 'pptx' && workspace.slides.length > 0) {
-        try {
-          const slidesInput = workspace.slides.map((s) => ({
-            layout_type: s.layout,
-            title_text: s.title,
-            key_message_text: s.keyMessage,
-            bullets: s.bullets,
-            notes: s.notes || '',
-            item_count: s.bullets.length,
-            has_icon: !!s.icon,
-            font_family: 'Calibri',
-          }));
-          const result = await computeLayoutSpecs(JSON.stringify(slidesInput));
-          if (result.success && result.specs) {
-            layoutSpecsJson = result.specs;
-          }
-        } catch (err) {
-          console.log('[chat] Layout spec pre-computation failed (non-blocking):', err);
-        }
+        layoutSpecsPromise = computeLayoutSpecs(workspace.slides)
+          .then((result) => {
+            if (result.success && result.specs) layoutSpecsJson = result.specs;
+          })
+          .catch((err) => {
+            console.log('[chat] Layout spec pre-computation failed (non-blocking):', err);
+          });
+        slideAssetsPromise = persistSlideAssetsToWorkspace(workspace.slides, workspace.iconCollection)
+          .then((result) => {
+            if (!result.success) {
+              console.log('[chat] Slide asset persistence failed (non-blocking):', result.error);
+            }
+          })
+          .catch((err) => {
+            console.log('[chat] Slide asset persistence failed (non-blocking):', err);
+          });
       }
 
       let session: Awaited<ReturnType<CopilotClient['createSession']>> | null = null;
@@ -552,88 +521,92 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
           activeChatRequest = null;
           failRequest(reason);
           if (session) {
-            void session.disconnect().catch(() => {});
+            void session.disconnect().catch(() => { });
           }
         },
       };
 
       // Tool factories (close over win for IPC emission)
       const scenarioTool = defineTool('set_scenario', {
-      description:
-        'Set the slide scenario (outline) for the presentation workspace panel. ' +
-        'Each slide must have a keyMessage (the "so what" / key takeaway), a layout hint, and optionally an icon hint. ' +
-        'You may also include imageQuery when supporting images should later be searched for and selected on the slide. ' +
-        'Available layouts: title, agenda, section, bullets, cards, stats, comparison, timeline, diagram, summary. ' +
-        'The layout and icon are guidance for the later PPTX design step, not a rigid rendering contract. ' +
-        'When helpful, include a designBrief describing tone, audience, visual style, density, and layout approach. ' +
-        `Use Iconify icon IDs for icons. Supported examples and aliases: ${getAvailableIconChoices(workspace.iconCollection).join(', ')}.`,
-      parameters: {
-        type: 'object' as const,
-        properties: {
-          title: { type: 'string', description: 'Presentation title' },
-          slides: {
-            type: 'array',
-            description: 'Array of slide definitions',
-            items: {
+        description:
+          'Set the slide scenario (outline) for the presentation workspace panel. ' +
+          'Each slide must have a keyMessage (the "so what" / key takeaway), a layout hint, and optionally an icon hint. ' +
+          'You may also include imageQuery when supporting images should later be searched for and selected on the slide. ' +
+          'Available layouts: title, agenda, section, bullets, cards, stats, comparison, timeline, diagram, summary. ' +
+          'The layout and icon are guidance for the later PPTX design step, not a rigid rendering contract. ' +
+          'When helpful, include a designBrief describing tone, audience, visual style, density, and layout approach. ' +
+          `Use Iconify icon IDs for icons and stay within the selected collection (${workspace.iconCollection}). Prefer slide-specific icon hints over invented names.`,
+        parameters: {
+          type: 'object' as const,
+          properties: {
+            title: { type: 'string', description: 'Presentation title' },
+            slides: {
+              type: 'array',
+              description: 'Array of slide definitions',
+              items: {
+                type: 'object',
+                properties: {
+                  number: { type: 'number' },
+                  title: { type: 'string' },
+                  keyMessage: { type: 'string' },
+                  layout: { type: 'string' },
+                  bullets: { type: 'array', items: { type: 'string' } },
+                  notes: { type: 'string' },
+                  icon: { type: 'string' },
+                  imageQuery: { type: 'string' },
+                },
+                required: ['number', 'title', 'keyMessage', 'layout', 'bullets', 'notes'],
+              },
+            },
+            designBrief: {
               type: 'object',
               properties: {
-                number: { type: 'number' },
-                title: { type: 'string' },
-                keyMessage: { type: 'string' },
-                layout: { type: 'string' },
-                bullets: { type: 'array', items: { type: 'string' } },
-                notes: { type: 'string' },
-                icon: { type: 'string' },
-                imageQuery: { type: 'string' },
+                objective: { type: 'string' },
+                audience: { type: 'string' },
+                tone: { type: 'string' },
+                visualStyle: { type: 'string' },
+                colorMood: { type: 'string' },
+                density: { type: 'string' },
+                layoutApproach: { type: 'string' },
+                directions: { type: 'array', items: { type: 'string' } },
               },
-              required: ['number', 'title', 'keyMessage', 'layout', 'bullets', 'notes'],
+              required: ['objective', 'audience', 'tone', 'visualStyle', 'colorMood', 'density', 'layoutApproach', 'directions'],
             },
+            framework: { type: 'string' },
           },
-          designBrief: {
-            type: 'object',
-            properties: {
-              objective: { type: 'string' },
-              audience: { type: 'string' },
-              tone: { type: 'string' },
-              visualStyle: { type: 'string' },
-              colorMood: { type: 'string' },
-              density: { type: 'string' },
-              layoutApproach: { type: 'string' },
-              directions: { type: 'array', items: { type: 'string' } },
-            },
-            required: ['objective', 'audience', 'tone', 'visualStyle', 'colorMood', 'density', 'layoutApproach', 'directions'],
-          },
-          framework: { type: 'string' },
+          required: ['title', 'slides'],
         },
-        required: ['title', 'slides'],
-      },
-      handler: async (args: ScenarioPayload) => {
-        win.webContents.send('chat:scenario', args);
-        return { success: true, message: `Scenario "${args.title}" set with ${args.slides.length} slides.` };
-      },
-    });
+        handler: async (args: ScenarioPayload) => {
+          win.webContents.send('chat:scenario', args);
+          // Fire-and-forget: persist layout input for later use without blocking the LLM
+          computeLayoutSpecs(args.slides).catch((err) => {
+            console.log('[chat] Failed to compute layout specs for storyboard (non-blocking):', err);
+          });
+          return { success: true, message: `Scenario "${args.title}" set with ${args.slides.length} slides.` };
+        },
+      });
 
       const updateSlideTool = defineTool('update_slide', {
-      description: 'Update a single slide in the existing scenario. Use when the user asks to change a specific slide. You may also update imageQuery to change the image search keywords used for that slide.',
-      parameters: {
-        type: 'object' as const,
-        properties: {
-          number: { type: 'number' },
-          title: { type: 'string' },
-          keyMessage: { type: 'string' },
-          layout: { type: 'string' },
-          bullets: { type: 'array', items: { type: 'string' } },
-          notes: { type: 'string' },
-          icon: { type: 'string' },
-          imageQuery: { type: 'string' },
+        description: 'Update a single slide in the existing scenario. Use when the user asks to change a specific slide. You may also update imageQuery to change the image search keywords used for that slide.',
+        parameters: {
+          type: 'object' as const,
+          properties: {
+            number: { type: 'number' },
+            title: { type: 'string' },
+            keyMessage: { type: 'string' },
+            layout: { type: 'string' },
+            bullets: { type: 'array', items: { type: 'string' } },
+            notes: { type: 'string' },
+            icon: { type: 'string' },
+            imageQuery: { type: 'string' },
+          },
+          required: ['number', 'title', 'keyMessage', 'layout', 'bullets', 'notes'],
         },
-        required: ['number', 'title', 'keyMessage', 'layout', 'bullets', 'notes'],
-      },
-      handler: async (args: SlideUpdatePayload) => {
-        win.webContents.send('chat:slide-update', args);
-        return { success: true, message: `Slide ${args.number} updated.` };
-      },
-    });
+        handler: async (args: SlideUpdatePayload) => {
+          win.webContents.send('chat:slide-update', args);
+          return { success: true, message: `Slide ${args.number} updated.` };
+        },
+      });
 
       // ---------- PPTX layout infrastructure tools ----------
 
@@ -728,6 +701,10 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
         },
         handler: async () => {
           try {
+            // Wait for background layout spec computation if still in-flight
+            if (layoutSpecsPromise) await layoutSpecsPromise;
+            if (slideAssetsPromise) await slideAssetsPromise;
+
             const workspaceDir = await readWorkspaceDir();
             const previewRoot = path.join(workspaceDir, 'previews');
             const sourcePath = path.join(previewRoot, 'generated-source.py');
@@ -742,7 +719,7 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
             const title = workspace.title || 'Presentation';
 
             // Remove old output so we get fresh validation
-            await fs.unlink(outputPath).catch(() => {});
+            await fs.unlink(outputPath).catch(() => { });
 
             await executeGeneratedPythonCodeToFile(code, theme, title, outputPath, {
               iconCollection: workspace.iconCollection,
@@ -757,26 +734,26 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
       });
 
       const suggestFrameworkTool = defineTool('suggest_framework', {
-      description:
-        'Present available business frameworks to the user for selection. ' +
-        'The user defines the framework — do not auto-select one. ' +
-        'If the user has already specified a framework, use it directly without calling this tool. ' +
-        'Available frameworks: mckinsey (executive recommendation deck), scqa (situation-complication-question-answer), ' +
-        'pyramid (top-down argument), mece (problem decomposition), action-title (conclusion-first slides), ' +
-        'assertion-evidence (claim + supporting data), exec-summary-first (decision-maker deck).',
-      parameters: {
-        type: 'object' as const,
-        properties: {
-          primary: { type: 'string', description: 'Framework name chosen by the user' },
-          reasoning: { type: 'string', description: 'Why the user chose this framework, or context for the selection' },
+        description:
+          'Present available business frameworks to the user for selection. ' +
+          'The user defines the framework — do not auto-select one. ' +
+          'If the user has already specified a framework, use it directly without calling this tool. ' +
+          'Available frameworks: mckinsey (executive recommendation deck), scqa (situation-complication-question-answer), ' +
+          'pyramid (top-down argument), mece (problem decomposition), action-title (conclusion-first slides), ' +
+          'assertion-evidence (claim + supporting data), exec-summary-first (decision-maker deck).',
+        parameters: {
+          type: 'object' as const,
+          properties: {
+            primary: { type: 'string', description: 'Framework name chosen by the user' },
+            reasoning: { type: 'string', description: 'Why the user chose this framework, or context for the selection' },
+          },
+          required: ['primary', 'reasoning'],
         },
-        required: ['primary', 'reasoning'],
-      },
-      handler: async (args: { primary: string; reasoning: string }) => {
-        win.webContents.send('chat:framework-suggested', args);
-        return { success: true, message: `Framework "${args.primary}" suggested.` };
-      },
-    });
+        handler: async (args: { primary: string; reasoning: string }) => {
+          win.webContents.send('chat:framework-suggested', args);
+          return { success: true, message: `Framework "${args.primary}" suggested.` };
+        },
+      });
 
       const buildSessionConfig = (
         opts: Partial<SessionConfig>,
@@ -787,61 +764,19 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
         workspaceAbsPath: string,
       ): SessionConfig => {
         const workflowDirective = workflow?.agentDirective ?? '';
-        const pptxSystemMessage = [
-          workflowDirective,
-          'You are a PPTX code generation specialist.',
-          'Always respond in the same language as the user.',
-          'Use the current workspace slides, theme, data sources, and grounded image paths as the source of truth.',
-          'The layout validator runs automatically after generation and catches overlap, out-of-bounds, and text-overflow issues. If validation fails, use patch_layout_infrastructure to fix layout_specs.py or layout_validator.py, then call rerun_pptx.',
-          'Ensure contrast safety in the composition: avoid white-on-white, dark-on-dark, and mid-tone-on-mid-tone combinations. Add overlay panels when placing text over images.',
-          'CRITICAL LAYOUT RULE: Never use literal float coordinates for positioning.',
-          'Every x, y, w, h must reference a spec.* field from get_layout_spec() or be computed relative to one (e.g., spec.content_rect.y + idx * row_h).',
-          'Use get_layout_spec(layout_type) from the runtime namespace for element positioning.',
-          'For slides with title, key message, and body content, call flow_layout_spec(...) first so ALL zones (content, hero, chips, footer, sidebar) cascade when title text wraps.',
-          'Available sub-zone rects: spec.hero_rect, spec.chips_rect, spec.footer_rect, spec.sidebar_rect — use these instead of hardcoding values like hero_y=1.20 or chip_y=4.85.',
-          'Always enable MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE on text frames.',
-          'There is no runtime geometry repair pass anymore, so the generated code must be overlap-safe on its own: reserve notes/footer space, reduce or split content instead of crowding, keep aligned layouts aligned, and proactively use estimate_text_height_in() to size every paragraph-bearing box before placement.',
-          'If estimated text height consumes most of a box, the box is too small or the slide is too dense — use fewer boxes or split the slide.',
-          'For image consistency, treat slide.imagePath as the primary approved preview image and use that same image in the exported PPTX whenever it is present.',
-          'CRITICAL IMAGE RULE: When a slide has multiple images listed (image[0], image[1], …), use ALL of them in the slide composition — create a multi-image layout (e.g. side-by-side, grid, or collage) rather than picking just one. Each image must have its own safe_add_picture() call with non-overlapping coordinates.',
-          'CRITICAL ICON RULE: Every slide MUST call fetch_icon() at least once to add a visual icon. fetch_icon(name, color_hex) is pre-injected in the execution namespace — do NOT redefine it. Place the icon using spec.icon_rect if available, otherwise in the upper-right area. A deck without icons is a wall of text and is not acceptable. ONLY use icon names from the Available Icons list in the prompt context — do NOT invent or guess icon names. If an icon name is not in the list, fetch_icon() returns None and the slide will have no icon.',
-          'Focus only on producing a valid Python code block that uses python-pptx.',
-          'FORMAT RULE: Return exactly one fenced code block. The opening fence must be exactly ```python on its own line, followed by a newline. Do not put any extra text on the fence line.',
-          'FORMAT RULE: Preserve normal Python newlines and indentation. Do not compress multiple imports, defs, classes, or statements onto one line.',
-          'Do not suggest frameworks.',
-          'Do not call set_scenario.',
-          'Do not call update_slide.',
-          'Do not narrate status.',
-          'Output only the final python code block.',
-          'Use the runtime variables OUTPUT_PATH, PPTX_TITLE, and PPTX_THEME.',
-          'PRECOMPUTED_LAYOUT_SPECS is a list of LayoutSpec objects (one per slide) computed by the hybrid layout engine using PowerPoint COM AutoFit + constraint solver. When available (not None), use PRECOMPUTED_LAYOUT_SPECS[slide_index] instead of calling get_layout_spec() or flow_layout_spec(). This gives pixel-perfect coordinates based on actual text measurements.',
-          `WORKSPACE_DIR and IMAGES_DIR are pre-set absolute paths at runtime. WORKSPACE_DIR = "${workspaceAbsPath.replace(/\\/g, '\\\\')}", IMAGES_DIR = "${path.join(workspaceAbsPath, 'images').replace(/\\/g, '\\\\')}". When referencing slide images, use os.path.join(IMAGES_DIR, filename). ICON_CACHE_DIR is also pre-set — use fetch_icon() to load icons, do NOT construct icon paths manually.`,
-          'FONT RULE: For non-English text (Japanese, Korean, Chinese, Thai, Arabic, etc.), use resolve_font(text, base_font) to select the correct Noto Sans variant. Example: run.font.name = resolve_font(slide_title, "Calibri"). ',
-          'Never hardcode Yu Mincho or other CJK-specific fonts — resolve_font() handles script detection automatically. Noto Sans fonts are auto-downloaded if not installed.',
-          'Prefer defining build_presentation(output_path, theme, title), and save the deck to output_path.',
-          'LAYOUT FIX TOOLS: When layout validation fails with ERROR-level issues (overlap, text overflow, out-of-bounds), use patch_layout_infrastructure to read and patch layout_specs.py or layout_validator.py, then call rerun_pptx to re-execute the same code. This avoids regenerating the entire code block. Read the file first to understand the current values, then patch the specific dimension or threshold causing the error.',
-        ].filter(Boolean).join(' ');
-
         const storyFrameworkInstruction = frameworkAlreadySet
           ? 'IMPORTANT: The user has already chosen a business framework — it is shown in the Current Workspace section. Apply it directly. Do NOT ask the user to choose a framework again or list framework options.'
           : 'When creating a presentation outline, the business framework is defined by the user. If the user has already specified a framework, apply it directly. If not, present the available options using suggest_framework and ask the user to choose before calling set_scenario.';
-
-        const storySystemMessage = [
+        const pptxSystemMessage = buildManagedSystemPrompt('pptx', {
           workflowDirective,
-          'You are an expert presentation designer and business consultant that helps create professional PowerPoint decks.',
-          'Always respond in the same language as the user.',
-          'Use the provided file contents, scraped URL contents, active theme palette, available icons, and any selectedImages already attached to slides as grounding context for slide creation and PPTX generation.',
+          workspaceDir: workspaceAbsPath,
+          imagesDir: path.join(workspaceAbsPath, 'images'),
+        });
+
+        const storySystemMessage = buildManagedSystemPrompt('story', {
+          workflowDirective,
           storyFrameworkInstruction,
-          'Do not generate python-pptx code during prestaging or brainstorming workflows.',
-          'Use the slide panel as the destination for preliminary content creation so the user can refine slides and attach images before PPTX generation.',
-          'When generating PPTX later, treat slide layout and icon values as hints rather than rigid instructions, and choose a stronger visual composition when it communicates the approved story better.',
-          'For image consistency, treat slide.imagePath as the primary approved preview image and use that same image in the exported PPTX whenever it is present.',
-          'When a slide has multiple images listed (image[0], image[1], …), use ALL of them in the slide composition — create a multi-image layout (e.g. side-by-side, grid, or collage) rather than picking just one.',
-          'When updating a single slide, use update_slide.',
-          'Never output slide listings in the chat message itself.',
-          'Keep chat messages short — action summaries only.',
-          'Use strong action-title headlines for every slide.',
-        ].filter(Boolean).join(' ');
+        });
 
         return {
           ...opts,
@@ -889,7 +824,7 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
         const timeoutPromise = new Promise<never>((_, reject) => {
           timeoutHandle = setTimeout(() => {
             if (session) {
-              void session.disconnect().catch(() => {});
+              void session.disconnect().catch(() => { });
             }
             reject(new Error(`Generation timed out after ${Math.round(CHAT_REQUEST_TIMEOUT_MS / 60000)} minutes. Try a simpler prompt or run the request again.`));
           }, CHAT_REQUEST_TIMEOUT_MS);
@@ -907,7 +842,7 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
       } finally {
         clearRequestTimeout();
         activeChatRequest = null;
-        if (session) await session.disconnect().catch(() => {});
+        if (session) await session.disconnect().catch(() => { });
       }
     })().catch((err) => {
       const win = getWindow();

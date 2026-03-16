@@ -252,6 +252,18 @@ _DIAGRAM_BLUEPRINT = LayoutBlueprint(
     has_sidebar=True,
 )
 
+# -- chart ------------------------------------------------------------------
+_CHART_BLUEPRINT = LayoutBlueprint(
+    layout_type='chart',
+    zones=(
+        *_standard_header(),
+        ZoneDef(ZoneRole.CONTENT, min_h=2.5, preferred_h=4.2, stretch=True),
+        ZoneDef(ZoneRole.FOOTER, min_h=0.15, preferred_h=0.22, fixed_h=0.22),
+        _ZONE_NOTES,
+    ),
+    icon_size=1.6,
+)
+
 # -- registry ---------------------------------------------------------------
 
 _BLUEPRINTS: dict[str, LayoutBlueprint] = {
@@ -265,6 +277,7 @@ _BLUEPRINTS: dict[str, LayoutBlueprint] = {
     'timeline': _TIMELINE_BLUEPRINT,
     'summary': _SUMMARY_BLUEPRINT,
     'diagram': _DIAGRAM_BLUEPRINT,
+    'chart': _CHART_BLUEPRINT,
 }
 
 

@@ -178,10 +178,17 @@ def solve_layout(
         if zd.fixed_h is not None:
             solver.addConstraint((zv.h == zd.fixed_h) | kiwi.strength.required)
 
-        # Measured text height as minimum
+        # Measured text height as minimum — use strong (not required) for
+        # zones pinned near the bottom (NOTES, FOOTER) so the solver can
+        # compress them when text is too large for available space.
         mh = measured_heights.get(zd.role.value)
         if mh is not None and mh > zd.min_h:
-            solver.addConstraint((zv.h >= mh) | kiwi.strength.required)
+            strength = (
+                kiwi.strength.strong
+                if zd.role in (ZoneRole.NOTES, ZoneRole.FOOTER)
+                else kiwi.strength.required
+            )
+            solver.addConstraint((zv.h >= mh) | strength)
 
     # Sequential ordering (each zone starts after the previous one ends + gap)
     for i in range(1, len(zvs)):
@@ -328,6 +335,15 @@ def _build_layout_spec(
     summary_box = _rect(ZoneRole.SUMMARY_BOX)
     chips_rect = _rect(ZoneRole.CHIPS)
     footer_rect = _rect(ZoneRole.FOOTER)
+
+    # Synthesize a fallback content_rect for layouts that lack a CONTENT zone
+    # (e.g. title, section) so generated code can safely reference spec.content_rect.
+    if content_rect is None:
+        last_zone = key_rect or title_rect or accent_rect
+        fallback_y = round((last_zone.y + last_zone.h + tokens.gap_y) if last_zone else tokens.margin_top, 4)
+        notes_top = notes_rect.y if notes_rect else (SLIDE_HEIGHT_IN - 0.7)
+        fallback_h = round(max(notes_top - tokens.gap_y - fallback_y, 0.5), 4)
+        content_rect = RectSpec(mx, fallback_y, round(cw, 4), fallback_h)
 
     # Icon rect
     icon_rect = _icon_corner_rect(icon_size, tokens) if has_icon and icon_size > 0 else None

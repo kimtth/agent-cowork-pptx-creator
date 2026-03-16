@@ -9,7 +9,16 @@ interface Props {
   onClose: () => void
 }
 
-const FIELDS: { key: string; label: string; placeholder: string; secret?: boolean; hint?: string }[] = [
+type SettingsField = {
+  key: string
+  label: string
+  placeholder?: string
+  secret?: boolean
+  hint?: string
+  options?: Array<{ value: string; label: string }>
+}
+
+const FIELDS: SettingsField[] = [
   {
     key: 'GITHUB_TOKEN',
     label: 'GitHub Token',
@@ -47,6 +56,16 @@ const FIELDS: { key: string; label: string; placeholder: string; secret?: boolea
     label: 'Model Name',
     placeholder: 'gpt-5.4',
     hint: 'For github, use a GitHub-hosted Copilot model name such as gpt-5.4. For azure, use the deployment or model name.',
+  },
+  {
+    key: 'REASONING_EFFORT',
+    label: 'Reasoning Effort',
+    hint: 'Controls the model reasoning budget for chat sessions. Use low for speed, medium for balance, and high for harder planning or debugging tasks.',
+    options: [
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+    ],
   },
 ]
 
@@ -127,7 +146,7 @@ export function SettingsModal({ onClose }: Props) {
                 The preview panel renders local slide images from the generated PPTX on Windows. This requires Microsoft PowerPoint to be installed.
               </p>
 
-              {FIELDS.map(({ key, label, placeholder, secret, hint }) => (
+              {FIELDS.map(({ key, label, placeholder, secret, hint, options }) => (
                 <div key={key} className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
                     {label}
@@ -136,16 +155,31 @@ export function SettingsModal({ onClose }: Props) {
                     className="flex items-center gap-2 border px-3"
                     style={{ height: 36, background: 'var(--input-bg)', borderColor: 'var(--panel-border)' }}
                   >
-                    <input
-                      type={secret && !showSecret ? 'password' : 'text'}
-                      value={values[key] ?? ''}
-                      onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-                      placeholder={placeholder}
-                      className="flex-1 bg-transparent text-xs outline-none"
-                      style={{ color: 'var(--text-primary)' }}
-                      autoComplete="off"
-                      spellCheck={false}
-                    />
+                    {options ? (
+                      <select
+                        value={values[key] ?? 'low'}
+                        onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                        className="flex-1 bg-transparent text-xs outline-none"
+                        style={{ color: 'var(--text-primary)' }}
+                      >
+                        {options.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={secret && !showSecret ? 'password' : 'text'}
+                        value={values[key] ?? ''}
+                        onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                        placeholder={placeholder}
+                        className="flex-1 bg-transparent text-xs outline-none"
+                        style={{ color: 'var(--text-primary)' }}
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    )}
                     {secret && (
                       <button
                         onClick={() => setShowSecret((s) => !s)}

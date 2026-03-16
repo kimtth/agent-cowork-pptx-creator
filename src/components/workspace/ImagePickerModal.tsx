@@ -20,8 +20,6 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [downloading, setDownloading] = useState(false)
-  const effectiveQuery = query.trim() || slide.imageQuery?.trim() || slide.title.trim()
-  const bulletSignature = slide.bullets.join('\n')
 
   useEffect(() => {
     let cancelled = false
@@ -32,7 +30,7 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
       try {
         const result = await window.electronAPI.images.searchForSlide({
           ...slide,
-          imageQuery: effectiveQuery || null,
+          imageQuery: query.trim() || null,
         })
         if (cancelled) return
         setResolvedQuery(result.query)
@@ -49,7 +47,7 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
 
     void loadCandidates()
     return () => { cancelled = true }
-  }, [slide.number, slide.title, slide.keyMessage, bulletSignature, slide.imageQuery, effectiveQuery])
+  }, [slide, query])
 
   async function handleSelect(candidate: ImageSearchCandidate) {
     setSelectedIds((current) => current.includes(candidate.id)
@@ -64,13 +62,14 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
     setDownloading(true)
     setError(null)
     try {
+      const queries = (query || slide.imageQuery || slide.title)
+        .split(/[\r\n,;]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
       const selected = await Promise.all(selectedCandidates.map((candidate) => window.electronAPI.images.downloadForSlide({
         ...slide,
-        imageQuery: effectiveQuery || null,
-        imageQueries: effectiveQuery
-          .split(/[\r\n,;]+/)
-          .map((item) => item.trim())
-          .filter(Boolean),
+        imageQuery: query.trim() || null,
+        imageQueries: queries,
       }, candidate)))
       onSelected(selected)
       onClose()
@@ -100,7 +99,7 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
               Choose slide images
             </div>
             <div className="text-[11px] truncate" style={{ color: 'var(--text-muted)' }}>
-              {loading ? 'Searching…' : resolvedQuery || effectiveQuery || slide.title}
+              {loading ? 'Searching…' : resolvedQuery || query || slide.title}
             </div>
           </div>
           <button
@@ -183,10 +182,7 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
             </div>
           )}
         </div>
-        <div className="flex items-center justify-between border-t px-5" style={{ borderColor: 'var(--panel-border)', minHeight: 52 }}>
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            Select one or more images. Files are downloaded to the workspace only after you confirm.
-          </p>
+        <div className="flex items-center justify-end border-t px-5" style={{ borderColor: 'var(--panel-border)', minHeight: 52 }}>
           <button
             type="button"
             onClick={() => void handleDownloadSelected()}
@@ -194,7 +190,7 @@ export function ImagePickerModal({ slide, query, onClose, onSelected }: Props) {
             className="flex h-8 items-center gap-2 px-3 text-xs font-semibold disabled:opacity-40"
             style={{ background: 'var(--accent)', color: '#fff' }}
           >
-            {downloading ? <Loader2 size={13} className="animate-spin" /> : null}
+            {downloading && <Loader2 size={13} className="animate-spin" />}
             <span>{downloading ? 'Downloading…' : `Download selected (${selectedIds.length})`}</span>
           </button>
         </div>

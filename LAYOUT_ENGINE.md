@@ -18,6 +18,8 @@ The layout engine is a three-stage pipeline that produces pixel-perfect slide el
 The output `LayoutSpec` provides `RectSpec(x, y, w, h)` for every element zone (title, key message, content area, cards, icons, footer, etc.).
 `hybrid_layout.py` is the orchestration layer around these stages: it batches all measurement requests into one PowerPoint session, solves each slide in order, then serializes the resulting specs to JSON for injection into the Python runner.
 
+The workspace keeps both sides of this contract in `previews/`: `layout-input.json` stores the storyboard-derived `SlideContent[]` input, and `layout-specs.json` stores the computed `LayoutSpec[]` output.
+
 When the hybrid engine is unavailable or precomputation fails, the runtime falls back to the static templates in `layout_specs.py` via `get_layout_spec()` and, for text-driven cascading, `flow_layout_spec()`.
 
 ---
@@ -349,6 +351,10 @@ The engine returns one serialized `LayoutSpec` per slide. Important fields inclu
 
 The serialized specs are injected into the Python runner through the `PPTX_LAYOUT_SPECS_JSON` environment variable. `hybrid_layout.py` also exposes `serialize_specs()` / `deserialize_specs()` so the runner can round-trip them without re-solving.
 
+In the Electron app, `layout-input.json` is written as soon as slide-storyboard emits `set_scenario`, so the exact layout-engine input is available in the workspace even before PPTX generation starts. During generation, the same file is refreshed and `layout-specs.json` is written beside it.
+
+The workspace also stores `slide-assets.json` beside those files. That artifact is not part of the layout solver itself, but it travels with the same `previews/` contract so the Python runner can receive the approved per-slide image set, primary image path, image queries, and selected icon collection context used during PPTX generation.
+
 ---
 
 ## Validation Pipeline Integration
@@ -360,28 +366,30 @@ Generated python-pptx code
   Write PPTX file
         │
         ▼
-  validate_presentation(prs)
+  validate_and_fix_output(output_path)
         │
-        ├── No issues → ✅ Success
-        │
-        └── Issues found
-              │
-              ├── INFO/WARNING → ⚠️ Report (non-blocking)
-              │
-              └── ERROR → ❌ Report to agent
-                    │
-                    ▼
-              Agent uses patch_layout_infrastructure
-              to fix layout_specs.py or layout_validator.py
-                    │
-                    ▼
-              rerun_pptx (re-execute same code)
-                    │
-                    ▼
-              Re-validate → repeat if needed
+    ├── COM layout fix (normal PPTX export path)
+    │     Resize overflow-prone shapes when PowerPoint COM is available
+    │
+    ├── Contrast fix
+    │     Repair low-contrast text/fill combinations on glass panels/cards
+    │
+    └── validate_presentation(prs)
+      │
+      ├── No issues → ✅ Success
+      │
+      ├── INFO/WARNING only → ⚠️ Report (non-blocking)
+      │
+      ├── ≤ 2 blocking issues → ⚠️ Tolerated as incomplete layout
+      │
+      └── > 2 blocking issues → ❌ Raise runtime error with remediation hints
 ```
 
-The validator runs automatically after every PPTX generation. ERROR-level issues trigger agent self-correction via the `patch_layout_infrastructure` and `rerun_pptx` tools — the agent reads the infrastructure file, makes a targeted fix, and re-runs the same code without regenerating it from scratch.
+The validator runs automatically after every PPTX generation, but it is not the first post-processing step. `pptx-python-runner.py` currently performs COM-based overflow repair first when available, falls back to enabling auto-size flags when COM is unavailable, then applies a contrast-repair pass, and only then runs `validate_presentation()`.
+
+There is one preview-specific exception: when the Electron app is generating local preview PNGs, it sets `PPTX_SKIP_COM_LAYOUT_FIX=1`. In that path the runner skips the COM overflow-repair phase and keeps only contrast repair + validation before `render_preview_images()`. This avoids opening PowerPoint twice during preview generation while preserving the normal export path's stricter repair behavior.
+
+If validation still finds more than two blocking issues, the runner raises a `RuntimeError` with remediation hints. In the Electron app, those hints may point the agent toward helper tools such as `patch_layout_infrastructure` and `rerun_pptx`, but those tools are app-level recovery tooling rather than part of the layout engine's public API.
 
 ---
 
@@ -394,9 +402,11 @@ The final generated Python code does not talk to the layout engine directly. Ins
 | Symbol | Purpose |
 |--------|---------|
 | `PRECOMPUTED_LAYOUT_SPECS` | Preferred list of measured `LayoutSpec` objects from the hybrid engine |
-| `get_layout_spec()` | Fallback static spec generator |
-| `flow_layout_spec()` | Legacy dynamic flow helper for title/key-message cascading |
+| `get_layout_spec()` | Compatibility fallback that returns static `LayoutSpec` templates |
+| `flow_layout_spec()` | Compatibility helper that cascades title/key-message-driven vertical placement |
 | `LayoutSpec`, `RectSpec`, `CardsSpec`, `StatsSpec`, `TimelineSpec`, `ComparisonSpec` | Dataclasses used by generated code |
+| `SLIDE_ASSETS`, `slide_assets()`, `slide_image_paths()` | Approved per-slide asset metadata and helpers for selected images |
+| `PPTX_ICON_COLLECTION` | Active icon collection identifier enforced by the runtime |
 
 ### Content / Asset Helpers Injected at Runtime
 
@@ -404,11 +414,21 @@ The final generated Python code does not talk to the layout engine directly. Ins
 |--------|---------|
 | `safe_add_picture()` | Adds images safely, preserving aspect ratio and handling icon scaling |
 | `safe_image_path()` | Validates and normalizes image paths |
-| `fetch_icon()` | Loads an icon from the local icon cache |
+| `fetch_icon()` | Loads an icon from the local icon cache and rejects names outside the selected icon collection |
 | `resolve_font()` | Selects `Calibri` for Latin or the appropriate Noto Sans family for non-Latin text |
 | `ensure_noto_fonts()` | Downloads and installs missing Noto fonts on demand |
 | `estimate_text_height_in()` | Fallback text height heuristic used by generated code and validator |
 | `contrast_ratio()` / `ensure_contrast()` | Contrast helpers for choosing readable text colors on filled panels |
+
+### Asset-Grounding Rule
+
+Generated PPTX code should treat runtime asset metadata as authoritative:
+
+- `slide_image_paths(slide_index)` returns the approved local image paths for that slide in priority order.
+- `slide_assets(slide_index)` returns the full metadata object, including `imageQueries`, `primaryImagePath`, and the raw `selectedImages` entries.
+- `fetch_icon()` is constrained by `PPTX_ICON_COLLECTION`, so out-of-collection icon names return `None` instead of silently falling back to another set.
+
+This keeps the generated deck aligned with the user's chosen images and icon set instead of relying on prompt text alone.
 
 ### Execution Rule
 
@@ -426,7 +446,7 @@ else:
   )
 ```
 
-This ensures the measured, solver-backed geometry is used whenever available, while preserving a safe fallback path if precomputation fails.
+This ensures the measured, solver-backed geometry is used whenever available, while preserving a safe compatibility path if precomputation fails.
 
 ### Text Frame Rule
 
@@ -483,9 +503,9 @@ Shapes are excluded from collision checks based on heuristics such as shape type
 
 `TEXT_TO_FIT_SHAPE` can save a deck from catastrophic overflow, but it may reduce fonts to unreadable sizes. The preferred strategy remains: measure first, solve geometry second, render third.
 
-### 6. Static Fallback Specs Are Legacy Templates
+### 6. Static Fallback Specs Are Compatibility Templates
 
-`get_layout_spec()` and `flow_layout_spec()` remain important fallback tools, but they are still hand-authored templates. They intentionally share the same `LayoutSpec` contract as the hybrid engine, yet some coordinates remain historical approximations rather than exact matches for the blueprint-solved path. For production-quality placement, `PRECOMPUTED_LAYOUT_SPECS` should win whenever it is present.
+`get_layout_spec()` and `flow_layout_spec()` remain important compatibility helpers, but they are still hand-authored templates. They intentionally share the same `LayoutSpec` contract as the hybrid engine, yet some coordinates remain historical approximations rather than exact matches for the blueprint-solved path. For production-quality placement, `PRECOMPUTED_LAYOUT_SPECS` should win whenever it is present.
 
 ---
 
@@ -499,7 +519,8 @@ The engine works best when generated code follows a small set of strict rules:
 4. For title/key-message/notes textboxes, keep `MSO_AUTO_SIZE.NONE`; for fixed panels, use `TEXT_TO_FIT_SHAPE`.
 5. When a slide has many images, create a real multi-image composition instead of reusing one image placeholder.
 6. Treat title, key message, notes, and footer as reserved structural zones — do not place content into them opportunistically.
-7. If validation reports ERROR-level issues, patch the infrastructure or regenerate; do not keep stacking more shapes into the same space.
+7. If validation reports blocking issues, reduce density, reserve more space, or regenerate; do not keep stacking more shapes into the same space.
+8. Treat `patch_layout_infrastructure` and `rerun_pptx` as app-level repair tooling, not as part of the layout engine API contract.
 
 ---
 

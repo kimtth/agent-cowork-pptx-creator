@@ -213,7 +213,21 @@ def _estimate_required_text_height_in(shape, box: ShapeBox) -> float | None:
     if not text:
         return None
 
-    width_in = box.width / 914400
+    margin_x_emu = 0
+    margin_y_emu = 0
+    if getattr(shape, 'has_text_frame', False):
+        try:
+            tf = shape.text_frame
+            margin_x_emu += int(getattr(tf, 'margin_left', 0) or 0)
+            margin_x_emu += int(getattr(tf, 'margin_right', 0) or 0)
+            margin_y_emu += int(getattr(tf, 'margin_top', 0) or 0)
+            margin_y_emu += int(getattr(tf, 'margin_bottom', 0) or 0)
+        except Exception:
+            margin_x_emu = 0
+            margin_y_emu = 0
+
+    usable_width_emu = max(box.width - margin_x_emu, int(0.15 * 914400))
+    width_in = usable_width_emu / 914400
     if width_in <= 0.15:
         return None
 
@@ -223,7 +237,9 @@ def _estimate_required_text_height_in(shape, box: ShapeBox) -> float | None:
     # Add a small pad for text frame margins and bullet indentation.
     if any(line.lstrip().startswith(('-', '*', '\u2022', '\u25cf', '\u25aa', '•')) for line in text.splitlines()):
         required += 0.08
-    return required + 0.04
+
+    margin_y_in = margin_y_emu / 914400
+    return required + margin_y_in + 0.04
 
 
 def validate_slide(slide, slide_index: int) -> list[LayoutIssue]:
@@ -255,11 +271,12 @@ def validate_slide(slide, slide_index: int) -> list[LayoutIssue]:
         ratio = required_h_in / max(available_h_in, 0.01)
         if ratio > 1.12:
             overflow_sev = IssueSeverity.ERROR
-            # Shapes with TEXT_TO_FIT_SHAPE let PowerPoint auto-shrink the
-            # font, so overflow is cosmetic rather than structural.
+            # Auto-sized panel shapes may still render with visible clipping, so
+            # only downgrade mild overflows. Severe overflow remains blocking.
             try:
                 if (getattr(shape, 'has_text_frame', False)
-                        and shape.text_frame.auto_size == _TEXT_TO_FIT_SHAPE):
+                        and shape.text_frame.auto_size == _TEXT_TO_FIT_SHAPE
+                        and ratio <= 1.20):
                     overflow_sev = IssueSeverity.WARNING
             except Exception:
                 pass

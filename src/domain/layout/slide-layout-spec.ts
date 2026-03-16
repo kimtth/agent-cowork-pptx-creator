@@ -49,6 +49,10 @@ export interface SlideLayoutSpec {
     right: RectSpec
   }
   summaryBox?: RectSpec
+  chart?: {
+    chartRect: RectSpec
+    captionRect?: RectSpec
+  }
 }
 
 export const SLIDE_WIDTH_IN = 13.33

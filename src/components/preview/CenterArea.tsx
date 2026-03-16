@@ -2,23 +2,19 @@
  * CenterArea: locally rendered PPTX preview + export toolbar
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Download, Palette, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useSlidesStore } from '../../stores/slides-store'
 import { usePaletteStore } from '../../stores/palette-store'
 import { useChatStore } from '../../stores/chat-store'
-import { useDataSourcesStore } from '../../stores/data-sources-store'
 import { useProjectStore } from '../../stores/project-store'
 import { PptxPreviewCard } from './PptxPreviewCard.tsx'
-import { createAssistantMessage, createUserMessage, historyToIpc } from '../../application/chat-use-case'
-import { getAvailableIconChoices } from '../../domain/icons/iconify'
-import { getWorkflowConfig } from '../../domain/workflows/workflow-config'
+import { createAssistantMessage } from '../../application/chat-use-case'
 
 export function CenterArea() {
-  const { work, setPptxBuildError, setStreaming } = useSlidesStore()
+  const { work } = useSlidesStore()
   const { tokens, selectedIconCollection } = usePaletteStore()
-  const { addMessage, messages } = useChatStore()
-  const { files: dataSources, urls: urlSources } = useDataSourcesStore()
+  const { addMessage } = useChatStore()
   const { workspaceDir } = useProjectStore()
   const [selected, setSelected] = useState(0)
   const [exporting, setExporting] = useState(false)
@@ -29,109 +25,57 @@ export function CenterArea() {
   const [previewCacheToken, setPreviewCacheToken] = useState(0)
 
   const slides = work.slides
-  const prevPptxCodeRef = useRef<string | null>(null)
-  const tokensRef = useRef(tokens)
-
-  useEffect(() => {
-    tokensRef.current = tokens
-  }, [tokens])
-
-  /** Send the build error to the coding agent for automatic regeneration */
-  const triggerErrorFeedback = (error: string) => {
-    setPptxBuildError(error)
-    const availableIcons = getAvailableIconChoices(selectedIconCollection)
-    const workflow = getWorkflowConfig('create-pptx')
-    const errorMessage = 'The generated python-pptx code failed to execute. Apply a MINIMAL fix — only change the specific lines causing the error. Do NOT regenerate the entire file from scratch.'
-    const errorUserMessage = createUserMessage(errorMessage)
-    addMessage(errorUserMessage)
-    setStreaming(true)
-    window.electronAPI.chat.send(errorMessage, historyToIpc([...messages, errorUserMessage]), {
-      title: work.title,
-      slides: work.slides,
-      designBrief: work.designBrief,
-      designStyle: work.designStyle,
-      framework: work.framework,
-      pptxBuildError: error,
-      theme: tokens,
-      workflow,
-      dataSources,
-      urlSources,
-      iconProvider: 'iconify',
-      iconCollection: selectedIconCollection,
-      availableIcons,
-    })
-  }
 
   useEffect(() => {
     setSelected((current) => Math.min(current, Math.max(previewImages.length - 1, 0)))
   }, [previewImages.length])
 
   useEffect(() => {
-    prevPptxCodeRef.current = null
+    let cancelled = false
     setPreviewImages([])
     setPreviewCacheToken((current) => current + 1)
     setPreviewWarning(null)
     setSelected(0)
-  }, [workspaceDir])
 
-  useEffect(() => {
-    let cancelled = false
-    prevPptxCodeRef.current = work.pptxCode
-
-    const run = async () => {
-      if (!work.pptxCode) {
-        setPreviewImages([])
-        setPreviewWarning(null)
-        setRendering(false)
-        return
-      }
-
-      setRendering(true)
-      setPreviewWarning(null)
-      const result = await window.electronAPI.pptx.renderPreview(
-        work.pptxCode,
-        tokensRef.current,
-        work.title || 'presentation',
-        selectedIconCollection,
-      )
-      if (cancelled) return
-
-      if (result.success) {
-        setPreviewImages(result.imagePaths ?? [])
-        setPreviewCacheToken((current) => current + 1)
-        if (result.warning) setPreviewWarning(result.warning)
-      } else {
-        setPreviewImages([])
-        setPreviewCacheToken((current) => current + 1)
-        // Pass execution errors to the coding agent for auto-regeneration
-        const errorText = result.error ?? 'Failed to render slide preview'
-        triggerErrorFeedback(errorText)
-      }
-      setRendering(false)
+    const loadCached = async () => {
+      if (!workspaceDir) return
+      try {
+        const result = await window.electronAPI.pptx.readExistingPreviews()
+        if (cancelled) return
+        if (result.success && result.imagePaths.length > 0) {
+          setPreviewImages(result.imagePaths)
+          setPreviewCacheToken((current) => current + 1)
+        }
+      } catch { /* ignore */ }
     }
 
-    void run()
+    const handlePreviewReady = () => { void loadCached() }
+    window.addEventListener('pptx-preview-ready', handlePreviewReady)
+
+    void loadCached()
 
     return () => {
       cancelled = true
+      window.removeEventListener('pptx-preview-ready', handlePreviewReady)
     }
-  }, [work.pptxCode, work.title, workspaceDir, selectedIconCollection])
+  }, [workspaceDir])
 
   const refreshPreview = async () => {
-    if (!work.pptxCode) return
+    if (!workspaceDir) return
     setRendering(true)
     setPreviewWarning(null)
 
-    const result = await window.electronAPI.pptx.renderPreview(work.pptxCode, tokens, work.title || 'presentation', selectedIconCollection)
+    const result = await window.electronAPI.pptx.readExistingPreviews()
     if (result.success) {
       setPreviewImages(result.imagePaths ?? [])
       setPreviewCacheToken((current) => current + 1)
-      if (result.warning) setPreviewWarning(result.warning)
+      if ((result.imagePaths ?? []).length === 0) {
+        setPreviewWarning('No generated preview images were found in the workspace previews folder.')
+      }
     } else {
       setPreviewImages([])
       setPreviewCacheToken((current) => current + 1)
-      const errorText = result.error ?? 'Failed to render slide preview'
-      triggerErrorFeedback(errorText)
+      setPreviewWarning('Failed to load preview images from the workspace previews folder.')
     }
     setRendering(false)
   }
@@ -183,7 +127,7 @@ export function CenterArea() {
               style={{ background: 'var(--surface-hover)', color: 'var(--text-primary)', borderColor: 'var(--panel-border)' }}
             >
               <RefreshCw size={12} className={rendering ? 'animate-spin' : ''} />
-              {rendering ? 'Rendering…' : 'Refresh Preview'}
+              {rendering ? 'Loading…' : 'Refresh Preview'}
             </button>
           )}
           {tokens && (
@@ -236,15 +180,25 @@ export function CenterArea() {
         {rendering ? (
           <div className="text-center" style={{ color: 'var(--text-muted)' }}>
             <div className="text-5xl mb-4 opacity-30">🖼️</div>
-            <p className="text-sm">Rendering slide previews…</p>
-            <p className="text-xs mt-1">The app is generating the deck and exporting slide images locally.</p>
+            <p className="text-sm">Loading slide previews…</p>
+            <p className="text-xs mt-1">The app is reading generated preview images from the workspace.</p>
           </div>
         ) : previewImages.length === 0 ? (
           <div className="text-center" style={{ color: 'var(--text-muted)' }}>
             <div className="text-5xl mb-4 opacity-30">🖥️</div>
-            <p className="text-sm">Rendered slide previews will appear here.</p>
-            <p className="text-xs mt-1">Create PPTX code first, then the app will render slide images locally.</p>
-            <p className="text-xs mt-1">Windows preview rendering requires Microsoft PowerPoint to be installed.</p>
+            {work.pptxCode ? (
+              <>
+                <p className="text-sm">PPTX is ready.</p>
+                <p className="text-xs mt-1">Preview images load automatically after generation.</p>
+                <p className="text-xs mt-1">Use <strong>Refresh Preview</strong> only if you want to reload from the workspace.</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm">Rendered slide previews will appear here.</p>
+                <p className="text-xs mt-1">Create PPTX code first.</p>
+                <p className="text-xs mt-1">Use <strong>Refresh Preview</strong> only to reload preview images that already exist in the workspace.</p>
+              </>
+            )}
           </div>
         ) : (
           <>

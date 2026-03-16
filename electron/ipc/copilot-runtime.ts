@@ -9,6 +9,11 @@ const AZURE_OPENAI_SCOPE = 'https://cognitiveservices.azure.com/.default';
 const require = createRequire(import.meta.url);
 const WORKFLOW_INSTRUCTIONS_DIR = path.join(app.getAppPath(), 'workflows');
 
+function resolveReasoningEffort(): 'low' | 'medium' | 'high' {
+  const value = process.env.REASONING_EFFORT?.trim().toLowerCase();
+  return value === 'medium' || value === 'high' ? value : 'low';
+}
+
 export function resetCopilotClient(): void {
   clientInstance = null;
 }
@@ -34,12 +39,13 @@ export async function getSessionOptions(opts?: {
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.trim();
   const modelName = opts?.model ?? process.env.MODEL_NAME;
   const streaming = opts?.streaming ?? false;
+  const reasoningEffort = resolveReasoningEffort();
   const useAzureOpenAI = Boolean(endpoint);
   const useGitHubModels = !useAzureOpenAI && (!provider || provider === 'openai' || provider === 'github');
 
-  if (!provider && !modelName && !useAzureOpenAI) return { streaming, reasoningEffort: 'medium' };
+  if (!provider && !modelName && !useAzureOpenAI) return { streaming, reasoningEffort };
   if (useGitHubModels) {
-    return { ...(modelName ? { model: modelName } : {}), streaming, reasoningEffort: 'medium' };
+    return { ...(modelName ? { model: modelName } : {}), streaming, reasoningEffort };
   }
 
   if (useAzureOpenAI) {
@@ -63,7 +69,7 @@ export async function getSessionOptions(opts?: {
     return {
       model: modelName,
       streaming,
-      reasoningEffort: 'medium',
+      reasoningEffort,
       provider: {
         type: 'openai',
         baseUrl: endpoint.replace(/\/$/, ''),

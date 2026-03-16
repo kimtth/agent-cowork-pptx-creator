@@ -339,19 +339,17 @@ export function ChatPanel() {
             {streaming && (
               <button
                 onClick={cancel}
-                className="flex shrink-0 items-center justify-center gap-2 text-xs font-semibold transition-colors"
+                className="flex shrink-0 items-center justify-center text-xs font-semibold transition-colors"
                 style={{
                   background: 'var(--surface-hover)',
                   color: 'var(--text-primary)',
                   border: '1px solid var(--panel-border)',
                   height: 32,
-                  paddingLeft: 16,
-                  paddingRight: 16,
+                  width: 32,
                 }}
                 aria-label="Cancel"
               >
                 <X size={14} />
-                <span>Cancel</span>
               </button>
             )}
             <button

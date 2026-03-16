@@ -415,7 +415,7 @@ def main() -> int:
     slides_data = json.loads(input_path.read_text(encoding='utf-8'))
     slides = [SlideContent.from_dict(d) for d in slides_data]
 
-    print(f'[hybrid-layout] Computing specs for {len(slides)} slide(s)…', file=sys.stderr)
+    # print(f'[hybrid-layout] Computing specs for {len(slides)} slide(s)…', file=sys.stderr)
 
     specs = compute_adaptive_specs(slides)
     output_json = serialize_specs(specs)
@@ -425,7 +425,7 @@ def main() -> int:
     # Also emit to stdout for IPC consumption
     print(output_json)
 
-    print(f'[hybrid-layout] Wrote {len(specs)} spec(s) to {output_path}', file=sys.stderr)
+    # print(f'[hybrid-layout] Wrote {len(specs)} spec(s) to {output_path}', file=sys.stderr)
     return 0
 
 

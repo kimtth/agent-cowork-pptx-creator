@@ -13,7 +13,7 @@ import { toLocalImageUrl } from '../../application/local-image-url.ts'
 const LAYOUT_BADGE: Record<string, string> = {
   title: 'TTL', agenda: 'AGN', section: 'SEC', bullets: 'BUL',
   cards: 'CRD', stats: 'STA', comparison: 'CMP', timeline: 'TML',
-  diagram: 'DGM', summary: 'SUM',
+  diagram: 'DGM', summary: 'SUM', chart: 'CHT',
 }
 
 export function SlideNavigator() {

@@ -31,7 +31,8 @@ export type SlideLayout =
   | 'comparison'
   | 'timeline'
   | 'diagram'
-  | 'summary';
+  | 'summary'
+  | 'chart';
 
 export type FrameworkType =
   | 'mckinsey'

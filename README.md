@@ -100,6 +100,10 @@ pptx-handler.ts
 
 Pre-computed specs are injected as `PRECOMPUTED_LAYOUT_SPECS` into the generated code namespace. Requires `kiwisolver` and `pywin32` (Windows + PowerPoint).
 
+Hybrid layout artifacts are stored in the active workspace under `previews/`:
+- `layout-input.json` — the storyboard-derived `SlideContent[]` payload written immediately when `set_scenario` runs and refreshed again before layout computation
+- `layout-specs.json` — the computed `LayoutSpec[]` output written by `hybrid_layout.py`
+
 ## Persistent Storage
 
 App data is stored in the Electron `userData` directory:

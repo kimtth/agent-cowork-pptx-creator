@@ -8,6 +8,7 @@ import { WorkspaceAreaButton } from './components/workspace/WorkspaceAreaButton.
 import { SettingsModal } from './components/settings/SettingsModal.tsx'
 import { useChatStore } from './stores/chat-store.ts'
 import { useSlidesStore } from './stores/slides-store.ts'
+import { usePaletteStore } from './stores/palette-store.ts'
 import { useProjectStore } from './stores/project-store.ts'
 import { createAssistantMessage, extractPptxCodeBlock } from './application/chat-use-case.ts'
 import type { FrameworkType } from './domain/entities/slide-work'
@@ -49,6 +50,36 @@ export default function App() {
           if (code) {
             useSlidesStore.getState().setPptxCode(code)
             useSlidesStore.getState().setPptxBuildError(null)
+
+            // Auto-execute the generated code to produce PPTX + preview PNGs in workspace
+            const { tokens: paletteTokens, selectedIconCollection } = usePaletteStore.getState()
+            const pptxTitle = useSlidesStore.getState().work.title || 'presentation'
+            useChatStore.getState().addMessage(
+              createAssistantMessage('✅ PowerPoint code is ready. Generating the deck and preview images…'),
+            )
+            window.electronAPI.pptx.renderPreview(code, paletteTokens, pptxTitle, selectedIconCollection)
+              .then((result) => {
+                if (result.success) {
+                  window.dispatchEvent(new CustomEvent('pptx-preview-ready'))
+                  const warningNote = result.warning ? `\n\n⚠️ ${result.warning}` : ''
+                  useChatStore.getState().addMessage(
+                    createAssistantMessage(`✅ Deck generated! Preview images are ready.${warningNote}`),
+                  )
+                } else {
+                  const errMsg = result.error ?? result.warning ?? 'Unknown error'
+                  useSlidesStore.getState().setPptxBuildError(errMsg)
+                  useChatStore.getState().addMessage(
+                    createAssistantMessage(`⚠️ Deck generation failed: ${errMsg}`),
+                  )
+                }
+              })
+              .catch((err: unknown) => {
+                const msg = err instanceof Error ? err.message : String(err)
+                useSlidesStore.getState().setPptxBuildError(msg)
+                useChatStore.getState().addMessage(
+                  createAssistantMessage(`⚠️ Deck generation failed: ${msg}`),
+                )
+              })
           } else {
             const message = hasCodeBlock
               ? 'The model returned code, but it did not match a supported python-pptx script.'

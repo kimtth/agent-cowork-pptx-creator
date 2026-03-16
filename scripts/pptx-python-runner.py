@@ -6,6 +6,12 @@ import json
 import os
 import re
 import sys
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt  # noqa: E402
+import seaborn as sns  # noqa: E402
+import numpy as np  # noqa: E402
+
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -43,6 +49,7 @@ SLIDE_WIDTH_IN = 13.333
 SLIDE_HEIGHT_IN = 7.5
 
 ICON_CACHE_DIR = os.environ.get('ICON_CACHE_DIR', '')
+PPTX_ICON_COLLECTION = (os.environ.get('PPTX_ICON_COLLECTION', 'all') or 'all').strip()
 if not ICON_CACHE_DIR:
     _default_cache = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'skills', 'iconfy-list', 'cache')
     if os.path.isdir(_default_cache):
@@ -295,9 +302,14 @@ def _recolor_png(png_path: str, color_hex: str) -> str:
 def fetch_icon(name: str, color_hex: str = '000000', size: int = 256) -> str | None:
     """Load an icon PNG from the local cache, recolor via Pillow if needed."""
     if ':' not in name:
-        name = f'mdi:{name}'
+        default_prefix = PPTX_ICON_COLLECTION if PPTX_ICON_COLLECTION and PPTX_ICON_COLLECTION != 'all' else 'mdi'
+        name = f'{default_prefix}:{name}'
     prefix, icon_name = name.split(':', 1)
     png_name = f'{icon_name}.png'
+
+    if PPTX_ICON_COLLECTION != 'all' and prefix != PPTX_ICON_COLLECTION:
+        print(f'[icon] REJECTED: {prefix}:{icon_name} is outside selected collection {PPTX_ICON_COLLECTION}', file=sys.stderr)
+        return None
 
     if ICON_CACHE_DIR:
         cached = os.path.join(ICON_CACHE_DIR, prefix, png_name)
@@ -315,6 +327,56 @@ def _load_theme() -> dict[str, str]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _load_slide_assets() -> list[dict[str, object]]:
+    raw = os.environ.get('PPTX_SLIDE_ASSETS_JSON', '')
+    if not raw.strip():
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def slide_assets(slide_index: int) -> dict[str, object]:
+    if 0 <= slide_index < len(SLIDE_ASSETS):
+        asset = SLIDE_ASSETS[slide_index]
+        if isinstance(asset, dict):
+            return asset
+    return {}
+
+
+def slide_image_paths(slide_index: int) -> list[str]:
+    asset = slide_assets(slide_index)
+    paths: list[str] = []
+    selected_images = asset.get('selectedImages')
+    if isinstance(selected_images, list):
+        for image in selected_images:
+            if isinstance(image, dict):
+                image_path = image.get('imagePath')
+                if isinstance(image_path, str) and image_path.strip():
+                    paths.append(image_path)
+    primary_path = asset.get('primaryImagePath')
+    if isinstance(primary_path, str) and primary_path.strip() and primary_path not in paths:
+        paths.insert(0, primary_path)
+    return paths
+
+
+def slide_icon_name(slide_index: int) -> str | None:
+    asset = slide_assets(slide_index)
+    icon_name = asset.get('iconName') or asset.get('icon')
+    return icon_name if isinstance(icon_name, str) and icon_name.strip() else None
+
+
+def slide_icon_collection(slide_index: int) -> str | None:
+    asset = slide_assets(slide_index)
+    collection = asset.get('iconCollection')
+    return collection if isinstance(collection, str) and collection.strip() else None
+
+
+SLIDE_ASSETS = _load_slide_assets()
 
 
 def rgb_color(value: str | None, fallback: str = '000000') -> RGBColor:
@@ -454,6 +516,92 @@ def ensure_contrast(fg_hex: str, bg_hex: str, *, min_ratio: float = 4.5) -> str:
     return '2D2D2D' if bg_lum > 0.4 else 'F0F0F0'
 
 
+# ---------------------------------------------------------------------------
+# Chart / data-visualisation helpers
+# ---------------------------------------------------------------------------
+
+# Use Agg backend for headless rendering (no GUI dependency)
+from pptx.chart.data import CategoryChartData, XyChartData, ChartData  # noqa: E402
+from pptx.enum.chart import XL_CHART_TYPE  # noqa: E402
+
+
+def _theme_color_cycle(theme: dict[str, str]) -> list[str]:
+    """Build a matplotlib-compatible colour list from the PPTX theme dict."""
+    keys = ['accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6']
+    colors = [f'#{theme[k].lstrip("#")}' for k in keys if k in theme and theme[k]]
+    return colors or ['#6366F1', '#06B6D4', '#F59E0B', '#EF4444', '#10B981', '#8B5CF6']
+
+
+def render_chart_to_image(
+    fig: matplotlib.figure.Figure,
+    workspace_dir: str = '',
+    *,
+    dpi: int = 200,
+) -> str:
+    """Save a matplotlib Figure to a temporary PNG and return its absolute path.
+
+    The image is written to ``{workspace_dir}/previews/charts/`` so it
+    persists alongside other workspace artefacts.
+    """
+    if not workspace_dir:
+        workspace_dir = os.environ.get('WORKSPACE_DIR', '')
+    chart_dir = os.path.join(workspace_dir, 'previews', 'charts') if workspace_dir else os.path.join(os.getcwd(), 'charts')
+    os.makedirs(chart_dir, exist_ok=True)
+
+    import uuid
+    filename = f'chart_{uuid.uuid4().hex[:8]}.png'
+    filepath = os.path.join(chart_dir, filename)
+    fig.savefig(filepath, dpi=dpi, bbox_inches='tight', transparent=True, pad_inches=0.1)
+    plt.close(fig)
+    return filepath
+
+
+def add_chart_picture(
+    shapes,
+    fig: matplotlib.figure.Figure,
+    left,
+    top,
+    width=None,
+    height=None,
+    workspace_dir: str = '',
+):
+    """Render a matplotlib Figure to PNG, then embed it as a slide picture.
+
+    This is the primary helper for seaborn/matplotlib chart images.
+    Returns the picture shape or None on failure.
+    """
+    image_path = render_chart_to_image(fig, workspace_dir)
+    return safe_add_picture(shapes, image_path, left, top, width, height)
+
+
+def add_native_chart(
+    slide,
+    chart_type,
+    chart_data,
+    left,
+    top,
+    width,
+    height,
+    *,
+    theme: dict[str, str] | None = None,
+):
+    """Add an editable python-pptx chart to a slide and apply theme colours.
+
+    ``chart_type`` should be an ``XL_CHART_TYPE`` enum member.
+    ``chart_data`` should be a ``CategoryChartData``, ``XyChartData``, etc.
+    Returns the chart shape.
+    """
+    graphic_frame = slide.shapes.add_chart(chart_type, left, top, width, height, chart_data)
+    chart = graphic_frame.chart
+    if theme:
+        colors = _theme_color_cycle(theme)
+        for idx, series in enumerate(chart.series):
+            hex_val = colors[idx % len(colors)].lstrip('#')
+            series.format.fill.solid()
+            series.format.fill.fore_color.rgb = RGBColor.from_string(hex_val)
+    return graphic_frame
+
+
 def build_namespace(generated_path: Path, output_path: Path, *, workspace_dir: str = '') -> dict[str, object]:
     theme = _load_theme()
     title = os.environ.get('PPTX_TITLE', 'Presentation')
@@ -510,11 +658,29 @@ def build_namespace(generated_path: Path, output_path: Path, *, workspace_dir: s
         '_pptx_title': title,
         'fetch_icon': fetch_icon,
         'ICON_CACHE_DIR': ICON_CACHE_DIR,
+        'PPTX_ICON_COLLECTION': PPTX_ICON_COLLECTION,
+        'SLIDE_ASSETS': SLIDE_ASSETS,
+        'slide_assets': slide_assets,
+        'slide_image_paths': slide_image_paths,
+        'slide_icon_name': slide_icon_name,
+        'slide_icon_collection': slide_icon_collection,
         'resolve_font': resolve_font,
         'ensure_noto_fonts': ensure_noto_fonts,
         'contrast_ratio': contrast_ratio,
         'ensure_contrast': ensure_contrast,
         'set_fill_transparency': set_fill_transparency,
+        # Chart / data-visualisation
+        'matplotlib': matplotlib,
+        'plt': plt,
+        'sns': sns,
+        'np': np,
+        'CategoryChartData': CategoryChartData,
+        'XyChartData': XyChartData,
+        'ChartData': ChartData,
+        'XL_CHART_TYPE': XL_CHART_TYPE,
+        'render_chart_to_image': render_chart_to_image,
+        'add_chart_picture': add_chart_picture,
+        'add_native_chart': add_native_chart,
     }
 
 
@@ -586,29 +752,73 @@ def finalize_output(output_path: Path, namespace: dict[str, object]) -> None:
         raise RuntimeError('Generated python-pptx code completed without creating the PPTX output file.')
 
 
-def _com_fix_layout(output_path: Path) -> int:
-    """Measure text overflow via PowerPoint COM, then fix with python-pptx.
+def _normalize_shape_text(value: str) -> str:
+    return ' '.join(value.split())
 
-    Phase 1 (COM, read-only): For each text shape, temporarily sets
-    AutoSize=1 (grow-to-fit) and reads back the required height.
-    Phase 2 (python-pptx): For textboxes that overflow, shrinks font
-    sizes proportionally.  For auto shapes, sets TEXT_TO_FIT_SHAPE.
 
-    Returns the number of fixes applied, or -1 if COM is unavailable.
-    """
+def _extract_python_pptx_shape_text(shape) -> str:
+    if not getattr(shape, 'has_text_frame', False):
+        return ''
+    try:
+        return _normalize_shape_text('\n'.join(paragraph.text for paragraph in shape.text_frame.paragraphs))
+    except Exception:
+        return ''
+
+
+def _find_shape_for_overflow(slide, *, shape_id: int | None, shape_name: str, shape_text: str, fallback_index: int):
+    shapes_list = list(slide.shapes)
+
+    if shape_id is not None:
+        for candidate in shapes_list:
+            if getattr(candidate, 'shape_id', None) == shape_id:
+                return candidate
+
+    if shape_name:
+        matching_name = [candidate for candidate in shapes_list if (getattr(candidate, 'name', '') or '') == shape_name]
+        if len(matching_name) == 1:
+            return matching_name[0]
+        if shape_text:
+            for candidate in matching_name:
+                if _extract_python_pptx_shape_text(candidate) == shape_text:
+                    return candidate
+
+    if shape_text:
+        matching_text = [candidate for candidate in shapes_list if _extract_python_pptx_shape_text(candidate) == shape_text]
+        if len(matching_text) == 1:
+            return matching_text[0]
+
+    if 0 <= fallback_index < len(shapes_list):
+        return shapes_list[fallback_index]
+
+    return None
+
+
+def _shrink_text_frame_fonts(shape, scale: float) -> bool:
+    changed = False
+    minimum_pt = 8.0
+    for para in shape.text_frame.paragraphs:
+        if para.font.size is not None:
+            para.font.size = Pt(max(round(para.font.size.pt * scale, 1), minimum_pt))
+            changed = True
+        for run in para.runs:
+            if run.font.size is not None:
+                run.font.size = Pt(max(round(run.font.size.pt * scale, 1), minimum_pt))
+                changed = True
+    return changed
+
+
+def _collect_com_overflows(output_path: Path) -> list[dict[str, object]] | None:
+    """Return COM-measured overflow metadata, or None if COM is unavailable."""
     if sys.platform != 'win32':
-        return -1
+        return None
     try:
         import pythoncom  # type: ignore
         import win32com.client  # type: ignore
     except ImportError:
-        return -1
+        return None
 
     abs_path = str(output_path.resolve())
-
-    # Phase 1: COM measurement (non-destructive) --------------------------
-    # Each entry: (slide_idx_0, shape_idx_0, scale_factor, is_textbox)
-    overflows: list[tuple[int, int, float, bool]] = []
+    overflows: list[dict[str, object]] = []
 
     pythoncom.CoInitialize()
     ppt = None
@@ -630,6 +840,7 @@ def _com_fix_layout(output_path: Path) -> int:
                 text = shape.TextFrame.TextRange.Text
                 if not text or not text.strip():
                     continue
+                normalized_text = _normalize_shape_text(str(text))
 
                 orig_top = shape.Top
                 orig_height = shape.Height
@@ -649,7 +860,15 @@ def _com_fix_layout(output_path: Path) -> int:
                 # Check overflow (5 % tolerance)
                 if required_height > orig_height * 1.05:
                     scale = min(orig_height / required_height, 1.0)
-                    overflows.append((si - 1, shi - 1, scale, is_textbox))
+                    overflows.append({
+                        'slide_idx': si - 1,
+                        'shape_idx': shi - 1,
+                        'shape_id': getattr(shape, 'Id', None),
+                        'shape_name': str(getattr(shape, 'Name', '') or ''),
+                        'shape_text': normalized_text,
+                        'scale': scale,
+                        'is_textbox': is_textbox,
+                    })
                     print(
                         f'[layout] Slide {si}, "{shape.Name}": '
                         f'need {required_height:.0f}pt, have {orig_height:.0f}pt '
@@ -662,7 +881,7 @@ def _com_fix_layout(output_path: Path) -> int:
         prs_com = None
     except Exception as exc:
         print(f'[layout] COM measurement failed: {exc}', file=sys.stderr)
-        return -1
+        return None
     finally:
         if prs_com is not None:
             try:
@@ -677,42 +896,75 @@ def _com_fix_layout(output_path: Path) -> int:
                 pass
         pythoncom.CoUninitialize()
 
-    if not overflows:
-        return 0
+    return overflows
 
-    # Phase 2: python-pptx fixes ------------------------------------------
-    prs = Presentation(str(output_path))
-    fixes = 0
 
-    for slide_idx, shape_idx, scale, is_textbox in overflows:
-        if slide_idx >= len(prs.slides):
-            continue
-        slide = prs.slides[slide_idx]
-        shapes_list = list(slide.shapes)
-        if shape_idx >= len(shapes_list):
-            continue
-        shape = shapes_list[shape_idx]
-        if not shape.has_text_frame:
-            continue
+def _com_fix_layout(output_path: Path) -> int:
+    """Measure text overflow via PowerPoint COM, then repair text-bearing shapes.
 
-        safe_scale = max(scale, 0.55)  # Never shrink below 55 %
+    The repair runs in bounded passes. Each pass measures final overflow via COM,
+    then applies python-pptx fixes. Textboxes are manually shrunk because
+    PowerPoint ignores TEXT_TO_FIT_SHAPE for them. Auto shapes also get manual
+    shrink in addition to TEXT_TO_FIT_SHAPE because the auto-size flag alone has
+    proven insufficient for some dense card/footer compositions.
 
-        if is_textbox:
-            # Textbox: PowerPoint ignores AutoSize=2, so shrink fonts manually
-            for para in shape.text_frame.paragraphs:
-                for run in para.runs:
-                    if run.font.size is not None:
-                        new_pt = max(round(run.font.size.pt * safe_scale, 1), 8.0)
-                        run.font.size = Pt(new_pt)
-            fixes += 1
-        else:
-            # Auto shape: let PowerPoint shrink text at render time
-            shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-            fixes += 1
+    Returns the number of fixes applied, or -1 if COM is unavailable.
+    """
+    total_fixes = 0
+    max_passes = 2
 
-    if fixes > 0:
+    for pass_index in range(max_passes):
+        overflows = _collect_com_overflows(output_path)
+        if overflows is None:
+            return -1
+        if not overflows:
+            return total_fixes
+
+        prs = Presentation(str(output_path))
+        fixes = 0
+
+        for overflow in overflows:
+            slide_idx = int(overflow['slide_idx'])
+            shape_idx = int(overflow['shape_idx'])
+            scale = float(overflow['scale'])
+            is_textbox = bool(overflow['is_textbox'])
+            if slide_idx >= len(prs.slides):
+                continue
+            slide = prs.slides[slide_idx]
+            shape = _find_shape_for_overflow(
+                slide,
+                shape_id=overflow.get('shape_id') if isinstance(overflow.get('shape_id'), int) else None,
+                shape_name=str(overflow.get('shape_name', '') or ''),
+                shape_text=str(overflow.get('shape_text', '') or ''),
+                fallback_index=shape_idx,
+            )
+            if shape is None:
+                continue
+            if not shape.has_text_frame:
+                continue
+
+            # First pass is conservative, second pass can shrink a bit further.
+            minimum_scale = 0.55 if pass_index == 0 else 0.48
+            safe_scale = max(scale, minimum_scale)
+            shape.text_frame.word_wrap = True
+
+            if is_textbox:
+                if _shrink_text_frame_fonts(shape, safe_scale):
+                    fixes += 1
+            else:
+                shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+                if _shrink_text_frame_fonts(shape, safe_scale):
+                    fixes += 1
+                else:
+                    fixes += 1
+
+        if fixes <= 0:
+            return total_fixes
+
         prs.save(str(output_path))
-    return fixes
+        total_fixes += fixes
+
+    return total_fixes
 
 
 def _get_solid_fill_hex(shape) -> str | None:
@@ -844,23 +1096,24 @@ def _fix_low_contrast_text(output_path: Path) -> int:
     return fixes
 
 
-def validate_and_fix_output(output_path: Path) -> None:
-    """Run COM layout fix, contrast fix, then validation on the generated PPTX."""
+def validate_and_fix_output(output_path: Path, *, run_com_layout_fix: bool = True) -> None:
+    """Run optional COM layout fix, contrast fix, then validation on the generated PPTX."""
 
     # Step 1: COM-based text overflow fix (measure + resize)
-    com_fixes = _com_fix_layout(output_path)
-    if com_fixes > 0:
-        print(f'[layout] COM fix applied to {com_fixes} shape(s).', file=sys.stderr)
-    elif com_fixes < 0:
-        # COM unavailable: fallback to auto-size XML flags only
-        from layout_validator import _enforce_auto_size  # type: ignore
-        prs = Presentation(str(output_path))
-        fixes = 0
-        for slide in prs.slides:
-            fixes += _enforce_auto_size(slide)
-        if fixes > 0:
-            prs.save(str(output_path))
-            print(f'[layout-validator] Auto-size flags set on {fixes} frame(s) (no COM).', file=sys.stderr)
+    if run_com_layout_fix:
+        com_fixes = _com_fix_layout(output_path)
+        if com_fixes > 0:
+            print(f'[layout] COM fix applied to {com_fixes} shape(s).', file=sys.stderr)
+        elif com_fixes < 0:
+            # COM unavailable: fallback to auto-size XML flags only
+            from layout_validator import _enforce_auto_size  # type: ignore
+            prs = Presentation(str(output_path))
+            fixes = 0
+            for slide in prs.slides:
+                fixes += _enforce_auto_size(slide)
+            if fixes > 0:
+                prs.save(str(output_path))
+                print(f'[layout-validator] Auto-size flags set on {fixes} frame(s) (no COM).', file=sys.stderr)
 
     # Step 2: Fix low-contrast text on glass panels / cards
     contrast_fixes = _fix_low_contrast_text(output_path)
@@ -882,8 +1135,8 @@ def validate_and_fix_output(output_path: Path) -> None:
         has_overlap = any('overlap' in i.issue_type.value.lower() for i in blocking)
         has_text_overflow = any('text_overflow' in i.issue_type.value.lower() for i in blocking)
 
-        # Tolerate up to 2 blocking issues — treat as success with warnings
-        if len(blocking) <= 2:
+        # Tolerate up to 2 blocking issues only when they are not text overflow.
+        if len(blocking) <= 2 and not has_text_overflow:
             print(
                 f'[layout-validator] {len(blocking)} minor layout issue(s) detected (within tolerance). '
                 'PPTX generated with incomplete layout details.',
@@ -1002,7 +1255,8 @@ def main() -> int:
     finalize_output(output_path, namespace)
 
     try:
-        validate_and_fix_output(output_path)
+        skip_com_layout_fix = render_dir is not None and os.environ.get('PPTX_SKIP_COM_LAYOUT_FIX') == '1'
+        validate_and_fix_output(output_path, run_com_layout_fix=not skip_com_layout_fix)
     except Exception as exc:  # noqa: BLE001
         print(f'[layout-validator] Validation failed (PPTX was generated): {exc}', file=sys.stderr)
 

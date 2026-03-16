@@ -16,6 +16,7 @@ export const SETTINGS_KEYS = [
   'AZURE_OPENAI_API_KEY',
   'AZURE_TENANT_ID',
   'MODEL_NAME',
+  'REASONING_EFFORT',
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
