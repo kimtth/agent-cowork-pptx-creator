@@ -5,7 +5,7 @@ import path from 'path'
 import { createHash } from 'crypto'
 import { promisify } from 'util'
 import { load } from 'cheerio'
-import { readWorkspaceDir } from './workspace-utils.ts'
+import { readWorkspaceDir, resolveBundledPath } from './workspace-utils.ts'
 import { ensurePythonModule, pythonSetupHint, resolvePythonExecutable } from './python-runtime.ts'
 import type { ImageSearchCandidate, ImageSearchRequest, ImageSearchResult, ResolvedSlideImage } from '../../src/domain/ports/ipc'
 
@@ -130,7 +130,7 @@ async function searchGoogleImages(query: string): Promise<ImageSearchCandidate[]
   const python = await resolvePythonExecutable()
   await ensurePythonModule(python, 'icrawler', `Install the Python dependencies first. ${pythonSetupHint()}`)
 
-  const scriptPath = path.join(process.cwd(), 'scripts', 'google_image_search_icrawler.py')
+  const scriptPath = resolveBundledPath('scripts', 'google_image_search_icrawler.py')
   const queries = deriveQueries({ number: 0, title: '', keyMessage: '', bullets: [], imageQuery: query, imageQueries: [query] })
   const args = [scriptPath]
   for (const item of queries) {
@@ -141,7 +141,7 @@ async function searchGoogleImages(query: string): Promise<ImageSearchCandidate[]
   const { stdout } = await execFileAsync(
     python,
     args,
-    { timeout: 45_000, windowsHide: true, cwd: process.cwd(), env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
+    { timeout: 45_000, windowsHide: true, cwd: path.dirname(scriptPath), env: { ...process.env, PYTHONIOENCODING: 'utf-8' } },
   )
 
   const data = JSON.parse(stdout) as PythonImageSearchResponse

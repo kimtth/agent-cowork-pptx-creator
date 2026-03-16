@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'fs'
-import path from 'path'
 import { app } from 'electron'
+import { resolveBundledPath } from './workspace-utils.ts'
 
 export type SystemPromptMode = 'pptx' | 'story'
 
@@ -28,9 +28,9 @@ type PromptRuntimeValues = {
 let cachedConfig: SystemPromptConfig | null = null
 
 function resolveSystemPromptConfigPath(): string {
-  const appPathCandidate = path.join(app.getAppPath(), 'workflows', 'system-prompts.json')
-  if (existsSync(appPathCandidate)) return appPathCandidate
-  return path.join(process.cwd(), 'workflows', 'system-prompts.json')
+  const candidate = resolveBundledPath('workflows', 'system-prompts.json')
+  if (existsSync(candidate)) return candidate
+  return resolveBundledPath('workflows', 'system-prompts.json')
 }
 
 function loadSystemPromptConfig(): SystemPromptConfig {

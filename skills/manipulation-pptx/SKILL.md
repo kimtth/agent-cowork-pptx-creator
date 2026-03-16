@@ -215,43 +215,15 @@ tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE  # shrink text to fit fixed shape
 
 ### Layout Template System
 
-The runtime provides `get_layout_spec(layout_type, has_icon=False)` which returns pre-computed safe coordinates for every zone on every layout type. **Never use literal float coordinates. Every x, y, w, h must reference a `spec.*` field or be computed relative to one.**
+The runtime injects `PRECOMPUTED_LAYOUT_SPECS` — a `list[LayoutSpec]` (one per slide) computed by the hybrid layout engine using **PowerPoint COM AutoFit + kiwisolver constraint solver**. These specs have pixel-perfect coordinates based on actual text measurements. **Never use literal float coordinates. Every x, y, w, h must reference a `spec.*` field or be computed relative to one.**
 
 Available on `LayoutSpec`: `title_rect`, `key_message_rect`, `accent_rect`, `icon_rect`, `content_rect`, `notes_rect`, `summary_box`, `hero_rect`, `chips_rect`, `footer_rect`, `sidebar_rect`, `max_items`, `row_step`, `cards`, `stats`, `timeline`, `comparison`.
 
-For text-heavy slides, compute a flow-adjusted spec so text regions cascade in display order:
-
 ```python
-base_spec = get_layout_spec('bullets', has_icon=bool(slide_icon))
-spec = flow_layout_spec(
-    base_spec,
-    title_text=slide_title,
-    key_message_text=slide_key_message,
-    title_font_pt=30,
-    key_font_pt=18,
-)
-```
-
-`flow_layout_spec()` expands title/key-message areas based on estimated text height, then pushes ALL lower zones (content, cards, stats, hero, chips, footer, sidebar) down automatically.
-
-#### Pre-Computed Layout Specs (Hybrid Engine)
-
-When available, `PRECOMPUTED_LAYOUT_SPECS` is a `list[LayoutSpec]` (one per slide) computed by the hybrid layout engine using **PowerPoint COM AutoFit + kiwisolver constraint solver**. These specs have pixel-perfect coordinates based on actual text measurements — they are more accurate than `flow_layout_spec()`.
-
-**Usage:** When `PRECOMPUTED_LAYOUT_SPECS` is not `None`, use it instead of calling `get_layout_spec()` / `flow_layout_spec()`:
-
-```python
-# ✅ PREFERRED: use pre-computed specs when available
-if PRECOMPUTED_LAYOUT_SPECS is not None:
-    spec = PRECOMPUTED_LAYOUT_SPECS[slide_index]
-else:
-    base_spec = get_layout_spec('bullets', has_icon=bool(slide_icon))
-    spec = flow_layout_spec(base_spec, title_text=slide_title, key_message_text=slide_key_message)
-
+# Always use PRECOMPUTED_LAYOUT_SPECS
+spec = PRECOMPUTED_LAYOUT_SPECS[slide_index]
 # Then use spec.title_rect, spec.content_rect, etc. as usual
 ```
-
-The `LayoutSpec` shape is identical whether from `PRECOMPUTED_LAYOUT_SPECS` or `flow_layout_spec()`. All field names (`title_rect`, `content_rect`, `cards`, `stats`, `timeline`, `comparison`, etc.) are the same.
 
 #### Mandatory: No Hardcoded Coordinates
 
@@ -298,26 +270,21 @@ for idx, text in enumerate(chip_texts):
 | diagram  | —          | —          | —           | Right-side callout area |
 | others   | —          | —          | —           | — |
 
-All sub-zones cascade automatically via `flow_layout_spec()` when title text wraps.
+All sub-zones are pre-computed by the hybrid layout engine and included in `PRECOMPUTED_LAYOUT_SPECS`.
 
 There is no runtime geometry repair pass. The generated code must produce the final layout directly: reserve notes/footer space, keep aligned layouts aligned, and split or simplify content instead of relying on any post-processing fix-up.
 - Prefer 3-5 bullets per slide. If content is denser than that, convert it into two-column cards, stats, or a comparison structure.
 - **Maximum 5 content shapes per slide** (excluding slide title, key message, accent bar, and notes/footer). If more are needed, split the content across two slides or collapse items into a grid/card layout.
-- **`flow_layout_spec()` is mandatory** whenever the slide title text is longer than 60 characters. Using the static `get_layout_spec()` on long-title slides produces fixed Y coordinates that overlap auto-sized title text.
+- **Long titles are handled by the hybrid engine.** The pre-computed specs already account for title text wrapping — no additional `flow_layout_spec()` call is needed.
 - **Notes and footer shapes must be named with a `notes_` or `footer_` prefix** (e.g., `notes_body`, `footer_citation`). The layout engine skips these shapes entirely so they are never repositioned. Always place notes/footer shapes last in the slide-building code.
 - **Preserve alignment intentionally.** If a slide uses a grid, mirrored comparison, stacked sidebar, or evenly aligned cards, do not introduce compensating offsets per box. Reduce content instead of breaking the alignment system.
 - **Reserve `notes_rect` as a hard boundary.** No content shape may start at or extend into `spec.notes_rect.y` or below.
 - **Height-budget every text box before placement.** Use `estimate_text_height_in()` for body copy, card copy, sidebars, and summary panels before you finalize `h`.
-- **Pass `chip_texts` to `flow_layout_spec()` for title layouts.** This auto-expands chip height and cascades footer/notes below the taller chips. Example:
+- **Chip text expansion is handled by the hybrid engine.** The pre-computed specs already account for chip text heights. Example:
   ```python
-  spec = flow_layout_spec(
-      get_layout_spec("title", has_icon=True),
-      title_text=slide_data["key_message"],
-      key_message_text=slide_data["title"],
-      title_font_pt=28,
-      key_font_pt=15.2,
-      chip_texts=slide_data.get("bullets"),
-  )
+  spec = PRECOMPUTED_LAYOUT_SPECS[slide_index]
+  # spec.chips_rect is already sized for the chip text content
+  ```
   ```
 - **Use two-tier density scaling in `write_panel_text`.** When estimated text height exceeds ~85% of available height (dense), reduce font by 0.4–0.8pt. When it exceeds ~105% (severe), reduce by up to 1.8pt for title and 1.4pt for body, and tighten line spacing to 1.16. Never go below 12pt title / 11pt body.
 - **Do not place paragraph text into shallow boxes.** A text box with 2+ lines of body copy should usually be at least `0.95in` tall. A card with a title plus paragraph body should usually be at least `1.45in` tall.
@@ -387,14 +354,8 @@ def build_presentation(output_path, theme, title):
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = rgb_color(theme.get('BG'), 'FFFFFF')
 
-    # Use flow_layout_spec for text placement
-    spec = flow_layout_spec(
-        get_layout_spec('bullets', has_icon=True),
-        title_text='Your slide title',
-        key_message_text='Key message text',
-        title_font_pt=28,
-        key_font_pt=15,
-    )
+    # Use PRECOMPUTED_LAYOUT_SPECS for text placement
+    spec = PRECOMPUTED_LAYOUT_SPECS[0]
     txBox = slide.shapes.add_textbox(
         Inches(spec.title_rect.x), Inches(spec.title_rect.y),
         Inches(spec.title_rect.w), Inches(spec.title_rect.h))
@@ -488,7 +449,7 @@ Read or patch `layout_specs.py` (pre-computed layout coordinates) or `layout_val
 4. Re-run with `rerun_pptx`
 
 **Common fixes:**
-- **Overlap errors**: Adjust content widths in `get_layout_spec()` — e.g., reduce card/stats/comparison widths when `has_icon=True`
+- **Overlap errors**: Use `patch_layout_infrastructure` to adjust layout dimensions in `layout_specs.py`, then call `rerun_pptx`
 - **Text overflow errors**: Increase box heights or adjust validator thresholds in `layout_validator.py`
 - **Out-of-bounds errors**: Reduce x+w or y+h values so shapes stay within 13.33" × 7.5"
 

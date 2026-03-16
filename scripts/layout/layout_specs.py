@@ -1,27 +1,17 @@
 """Layout specifications for python-pptx slide generation.
 
 Ported from src/domain/layout/slide-layout-spec.ts.
-Provides pre-computed safe coordinates for 10 layout types so LLM-generated
-code can place elements without freehand guessing.
+Provides LayoutSpec / RectSpec dataclasses and the flow_layout_spec() cascade
+helper used by the constraint solver and hybrid layout engine.
+
+Production code must use PRECOMPUTED_LAYOUT_SPECS from the hybrid layout
+engine (hybrid_layout.py → constraint_solver.py).
 
 Usage in generated code:
 
-    spec = get_layout_spec('cards')
-    title = spec.title_rect          # RectSpec(x=0.5, y=0.72, w=12.33, h=0.34)
-    cards = spec.cards               # CardsSpec(columns=2, card_w=5.9, ...)
-
-    # Place title
-    txBox = slide.shapes.add_textbox(Inches(title.x), Inches(title.y),
-                                     Inches(title.w), Inches(title.h))
-
-    # Place cards in a grid
-    for i, item in enumerate(items[:spec.max_items]):
-        col = i % cards.columns
-        row = i // cards.columns
-        cx = cards.start_x + col * (cards.card_w + cards.gap_x)
-        cy = cards.start_y + row * (cards.card_h + cards.gap_y)
-        shape = slide.shapes.add_shape(..., Inches(cx), Inches(cy),
-                                       Inches(cards.card_w), Inches(cards.card_h))
+    spec = PRECOMPUTED_LAYOUT_SPECS[slide_index]
+    title = spec.title_rect          # RectSpec(x, y, w, h)
+    cards = spec.cards               # CardsSpec(columns, card_w, ...)
 """
 
 from __future__ import annotations
@@ -196,10 +186,47 @@ def estimate_text_height_in(
 
 
 def _cascade_subzone(rect: RectSpec | None, content_y: float, content_bottom: float) -> RectSpec | None:
-    """Reposition a sub-zone (hero, sidebar) so its top aligns with the content zone."""
+    """Reposition a sub-zone (hero, sidebar) so its top aligns with the content zone.
+
+    The original height from the constraint solver is preserved as a minimum so
+    that large hero / sidebar zones are not clipped by a small content_bottom.
+    """
     if rect is None:
         return None
-    return replace(rect, y=content_y, h=max(content_bottom - content_y, 0.8))
+    h = max(content_bottom - content_y, rect.h, 0.8)
+    # Don't extend past slide bottom (leave 0.3" margin)
+    max_h = SLIDE_HEIGHT_IN - 0.3 - content_y
+    return replace(rect, y=content_y, h=max(min(h, max_h), 0.8))
+
+
+def _compute_chip_height(
+    chips: RectSpec | None,
+    *,
+    chip_texts: list[str] | None = None,
+    chip_font_pt: float = 11.0,
+    chip_count: int | None = None,
+) -> float:
+    """Return the rendered chip band height, expanding for wrapped chip text."""
+    if chips is None:
+        return 0.0
+
+    new_h = chips.h
+    if chip_texts:
+        count = chip_count or len(chip_texts)
+        gap = chips.w * 0.02
+        chip_w = (chips.w - gap * max(count - 1, 0)) / max(count, 1)
+        usable_w = chip_w - 0.12  # subtract left+right margins
+        max_needed = 0.0
+        for text in chip_texts:
+            needed = estimate_text_height_in(
+                text, usable_w, chip_font_pt, line_height=1.12,
+            )
+            if needed > max_needed:
+                max_needed = needed
+        # add top+bottom margin (0.04 + 0.04) + small cushion
+        new_h = max(chips.h, max_needed + 0.10)
+
+    return new_h
 
 
 def _cascade_chips(
@@ -226,23 +253,15 @@ def _cascade_chips(
     else:
         target_y = content_bottom - 1.2
 
-    new_h = chips.h
-    if chip_texts:
-        count = chip_count or len(chip_texts)
-        gap = chips.w * 0.02
-        chip_w = (chips.w - gap * max(count - 1, 0)) / max(count, 1)
-        usable_w = chip_w - 0.12  # subtract left+right margins
-        max_needed = 0.0
-        for text in chip_texts:
-            needed = estimate_text_height_in(
-                text, usable_w, chip_font_pt, line_height=1.12,
-            )
-            if needed > max_needed:
-                max_needed = needed
-        # add top+bottom margin (0.04 + 0.04) + small cushion
-        new_h = max(chips.h, max_needed + 0.10)
+    new_h = _compute_chip_height(
+        chips,
+        chip_texts=chip_texts,
+        chip_font_pt=chip_font_pt,
+        chip_count=chip_count,
+    )
 
-    return replace(chips, y=min(target_y, content_bottom - 0.5), h=new_h)
+    max_y = max(content_bottom - new_h, 0.0)
+    return replace(chips, y=min(target_y, max_y), h=new_h)
 
 
 def _cascade_footer(
@@ -322,17 +341,32 @@ def flow_layout_spec(
 
     accent_rect = spec.accent_rect
     if accent_rect is not None:
-        accent_rect = replace(accent_rect, y=next_y)
-        next_y = accent_rect.y + accent_rect.h + 0.18
+        if accent_rect.y < spec.title_rect.y:
+            # Accent is a header decoration above the title — keep solver position
+            pass
+        else:
+            accent_rect = replace(accent_rect, y=next_y)
+            next_y = accent_rect.y + accent_rect.h + 0.18
 
     content_bottom = spec.notes_rect.y - 0.22 if spec.notes_rect is not None else 6.0
+
+    footer_gap = 0.12 if spec.footer_rect is not None else 0.0
+    footer_reserved = (spec.footer_rect.h + footer_gap) if spec.footer_rect is not None else 0.0
+    chip_height = _compute_chip_height(
+        spec.chips_rect,
+        chip_texts=chip_texts,
+        chip_font_pt=chip_font_pt,
+    )
+    chips_reserved = (chip_height + 0.12) if spec.chips_rect is not None else 0.0
+    chips_bottom = content_bottom - footer_reserved
+    flow_bottom = max(chips_bottom - chips_reserved, next_y)
 
     content_rect = spec.content_rect
     if content_rect is not None:
         content_rect = replace(
             content_rect,
             y=next_y,
-            h=max(content_bottom - next_y, 0.8),
+            h=max(flow_bottom - next_y, 0.8),
         )
 
     summary_box = spec.summary_box
@@ -343,16 +377,20 @@ def flow_layout_spec(
             content_rect = replace(
                 content_rect,
                 y=summary_bottom + 0.22,
-                h=max(content_bottom - (summary_bottom + 0.22), 0.6),
+                h=max(flow_bottom - (summary_bottom + 0.22), 0.6),
             )
 
     cards = spec.cards
     if cards is not None:
-        cards = replace(cards, start_y=next_y)
+        avail_h = max(flow_bottom - next_y, 0.8)
+        rows = max(math.ceil(spec.max_items / cards.columns), 1) if spec.max_items > 0 else max(math.ceil(1 / cards.columns), 1)
+        card_h = round((avail_h - (rows - 1) * cards.gap_y) / rows, 2)
+        cards = replace(cards, start_y=next_y, card_h=max(card_h, 0.5))
 
     stats = spec.stats
     if stats is not None:
-        stats = replace(stats, start_y=next_y + 0.08)
+        avail_h = max(flow_bottom - (next_y + 0.08), 0.8)
+        stats = replace(stats, start_y=next_y + 0.08, box_h=round(avail_h, 2))
 
     comparison = spec.comparison
     if comparison is not None:
@@ -363,15 +401,18 @@ def flow_layout_spec(
     timeline = spec.timeline
     if timeline is not None:
         line_h = max(content_bottom - next_y, 1.2)
+        eff_items = max(spec.max_items, 1)
+        step_y = round(line_h / eff_items, 4)
         timeline = replace(
             timeline,
             line_y=next_y,
             line_h=line_h,
             start_y=next_y - 0.04,
+            step_y=step_y,
         )
 
     cascaded_chips = _cascade_chips(
-        spec.chips_rect, content_rect, content_bottom,
+        spec.chips_rect, content_rect, chips_bottom,
         chip_texts=chip_texts, chip_font_pt=chip_font_pt,
         fallback_y=next_y,
     )
@@ -391,201 +432,4 @@ def flow_layout_spec(
         stats=stats,
         comparison=comparison,
         timeline=timeline,
-    )
-
-
-def get_layout_spec(layout_type: str, has_icon: bool = False) -> LayoutSpec:
-    """Return the pre-computed layout specification for a given slide layout type.
-
-    Args:
-        layout_type: One of title, section, agenda, bullets, cards, stats,
-                     comparison, timeline, diagram, summary.
-        has_icon: Whether the slide includes an icon (affects bullets layout).
-    """
-    lt = layout_type.lower().strip()
-
-    if lt == 'title':
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 1.15, 7.9, 0.6),
-            key_message_rect=_header_rect(0.5, 1.86, 7.3, 0.46),
-            accent_rect=RectSpec(0.5, 0.78, 0.9, 0.06),
-            icon_rect=_icon_corner_rect(2.35),
-            content_rect=RectSpec(0.5, 2.50, 7.85, 2.0),
-            hero_rect=RectSpec(8.85, 1.20, 3.65, 3.65),
-            chips_rect=RectSpec(0.5, 4.55, 7.85, 0.46),
-            footer_rect=RectSpec(0.5, 5.22, 7.85, 0.70),
-            notes_rect=RectSpec(0.5, 6.58, 12.33, 0.35),
-            max_items=0,
-        )
-
-    if lt == 'section':
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.9, 2.1, 8.4, 0.48),
-            key_message_rect=_header_rect(0.9, 2.58, 8.9, 0.68),
-            accent_rect=RectSpec(0.9, 1.68, 0.9, 0.05),
-            icon_rect=_icon_corner_rect(1.6),
-            content_rect=RectSpec(0.9, 3.40, 8.9, 2.40),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=0,
-        )
-
-    if lt == 'agenda':
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, 9.1, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, 9.1, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            content_rect=RectSpec(0.5, 1.86, 8.8, 3.36),
-            sidebar_rect=RectSpec(9.62, 2.18, 2.88, 3.72),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=5,
-            row_step=0.58,
-        )
-
-    if lt == 'cards':
-        tw = 9.1 if has_icon else 12.33
-        cw = 9.3 if has_icon else 12.33
-        card_w_val = round((cw - 0.32) / 2, 2)
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-            content_rect=RectSpec(0.5, 1.86, cw, 3.8),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=4,
-            cards=CardsSpec(
-                columns=2,
-                card_w=card_w_val,
-                card_h=1.42,
-                start_x=0.5,
-                start_y=1.86,
-                gap_x=0.32,
-                gap_y=0.18,
-            ),
-        )
-
-    if lt == 'stats':
-        tw = 9.1 if has_icon else 12.33
-        cw = 9.3 if has_icon else 12.33
-        box_w_val = round((cw - 0.35 * 2) / 3, 2)
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-            content_rect=RectSpec(0.5, 1.95, cw, 3.0),
-            footer_rect=RectSpec(0.5, 4.90, 12.33, 0.72),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=3,
-            stats=StatsSpec(
-                start_x=0.5,
-                start_y=1.95,
-                box_w=box_w_val,
-                box_h=1.85,
-                gap_x=0.35,
-            ),
-        )
-
-    if lt == 'comparison':
-        tw = 9.1 if has_icon else 12.33
-        cw = 9.3 if has_icon else 12.33
-        half_w = round((cw - 0.25) / 2, 2)
-        right_x = round(0.5 + half_w + 0.25, 2)
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-            content_rect=RectSpec(0.5, 1.95, cw, 3.45),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=6,
-            comparison=ComparisonSpec(
-                left=RectSpec(0.5, 1.95, half_w, 3.45),
-                right=RectSpec(right_x, 1.95, half_w, 3.45),
-            ),
-        )
-
-    if lt == 'timeline':
-        tw = 9.1 if has_icon else 12.33
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=5,
-            timeline=TimelineSpec(
-                line_x=1.1,
-                line_y=1.86,
-                line_h=3.34,
-                dot_x=0.98,
-                dot_size=0.24,
-                start_y=1.82,
-                step_y=0.62,
-                text_x=1.45,
-                text_w=10.8,
-            ),
-        )
-
-    if lt == 'summary':
-        tw = 9.1 if has_icon else 12.33
-        cw = 9.3 if has_icon else 12.33
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-            summary_box=RectSpec(0.5, 1.86, cw, 0.88),
-            content_rect=RectSpec(0.5, 3.1, cw, 2.8),
-            notes_rect=RectSpec(0.5, 6.58, 12.33, 0.35),
-            max_items=3,
-        )
-
-    if lt == 'diagram':
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, 9.1, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, 9.1, 0.55),
-            accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(1.8),
-            content_rect=RectSpec(0.5, 1.86, 8.9, 3.3),
-            sidebar_rect=RectSpec(9.5, 1.86, 3.33, 3.3),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=5,
-        )
-
-    if lt == 'chart':
-        tw = 9.1 if has_icon else 12.33
-        return LayoutSpec(
-            layout_type=lt,
-            title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-            key_message_rect=_header_rect(0.5, 1.02, tw, 0.40),
-            accent_rect=RectSpec(0.5, 1.46, 1.5, 0.04),
-            icon_rect=_icon_corner_rect(1.6) if has_icon else None,
-            content_rect=RectSpec(0.5, 1.62, 12.33, 4.2),
-            footer_rect=RectSpec(0.5, 5.90, 12.33, 0.22),
-            notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-            max_items=1,
-        )
-
-    # bullets (default)
-    tw = 9.1 if has_icon else 12.33
-    cw = 9.3 if has_icon else 12.33
-    return LayoutSpec(
-        layout_type='bullets',
-        title_rect=_header_rect(0.5, 0.5, tw, 0.50),
-        key_message_rect=_header_rect(0.5, 1.02, tw, 0.55),
-        accent_rect=RectSpec(0.5, 1.62, 1.5, 0.04),
-        icon_rect=_icon_corner_rect(2.1) if has_icon else None,
-        content_rect=RectSpec(0.5, 1.86, cw, 3.8),
-        notes_rect=RectSpec(0.5, 6.18, 12.33, 0.7),
-        max_items=6,
     )

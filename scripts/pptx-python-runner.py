@@ -32,7 +32,6 @@ else:
 from layout_specs import (  # type: ignore
     estimate_text_height_in,
     flow_layout_spec,
-    get_layout_spec,
     LayoutSpec,
     RectSpec,
     CardsSpec,
@@ -618,7 +617,14 @@ def build_namespace(generated_path: Path, output_path: Path, *, workspace_dir: s
             precomputed_specs = deserialize_specs(specs_json)
             print(f'[layout] Loaded {len(precomputed_specs)} pre-computed layout spec(s).', file=sys.stderr)
         except Exception as exc:  # noqa: BLE001
-            print(f'[layout] Failed to load pre-computed specs (using legacy): {exc}', file=sys.stderr)
+            raise RuntimeError(
+                f'Hybrid layout specs could not be loaded: {exc}'
+            ) from exc
+    else:
+        raise RuntimeError(
+            'PPTX_LAYOUT_SPECS_JSON is required. '
+            'Hybrid layout specs must be pre-computed before PPTX generation.'
+        )
 
     return {
         '__name__': '__main__',
@@ -646,7 +652,6 @@ def build_namespace(generated_path: Path, output_path: Path, *, workspace_dir: s
         'safe_add_picture': safe_add_picture,
         'estimate_text_height_in': estimate_text_height_in,
         'flow_layout_spec': flow_layout_spec,
-        'get_layout_spec': get_layout_spec,
         'LayoutSpec': LayoutSpec,
         'RectSpec': RectSpec,
         'CardsSpec': CardsSpec,
@@ -1149,7 +1154,7 @@ def validate_and_fix_output(output_path: Path, *, run_com_layout_fix: bool = Tru
             hints.append(
                 'TOOL HINT: Use patch_layout_infrastructure(action="read", file="layout_specs") to inspect '
                 'current layout coordinates, then patch_layout_infrastructure(action="patch", ...) to adjust '
-                'get_layout_spec() dimensions. After patching, call rerun_pptx to re-execute.'
+                'layout dimensions. After patching, call rerun_pptx to re-execute.'
             )
         if has_text_overflow:
             hints.append(

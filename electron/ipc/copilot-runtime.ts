@@ -1,13 +1,11 @@
 import { CopilotClient, approveAll } from '@github/copilot-sdk';
 import type { SessionConfig } from '@github/copilot-sdk';
 import { createRequire } from 'module';
-import path from 'path';
-import { app } from 'electron';
+import { resolveBundledPath } from './workspace-utils.ts';
 
 let clientInstance: CopilotClient | null = null;
 const AZURE_OPENAI_SCOPE = 'https://cognitiveservices.azure.com/.default';
 const require = createRequire(import.meta.url);
-const WORKFLOW_INSTRUCTIONS_DIR = path.join(app.getAppPath(), 'workflows');
 
 function resolveReasoningEffort(): 'low' | 'medium' | 'high' {
   const value = process.env.REASONING_EFFORT?.trim().toLowerCase();
@@ -83,11 +81,11 @@ export async function getSessionOptions(opts?: {
 }
 
 export function resolveWorkflowInstructionsDir(): string {
-  return WORKFLOW_INSTRUCTIONS_DIR;
+  return resolveBundledPath('workflows');
 }
 
 export function resolveWorkflowInstructionPath(fileName: string): string {
-  return path.join(WORKFLOW_INSTRUCTIONS_DIR, fileName);
+  return resolveBundledPath('workflows', fileName);
 }
 
 export function normalizeGitHubToken(value: string | undefined): string | undefined {
@@ -100,5 +98,11 @@ export function normalizeGitHubToken(value: string | undefined): string | undefi
 
 export function resolveCopilotCliPath(): string {
   const nativePkg = `@github/copilot-${process.platform}-${process.arch}`;
-  return require.resolve(nativePkg);
+  let resolved = require.resolve(nativePkg);
+  // Native executables can't run from inside an asar archive.
+  // electron-builder's asarUnpack extracts them to app.asar.unpacked/.
+  if (resolved.includes('app.asar') && !resolved.includes('app.asar.unpacked')) {
+    resolved = resolved.replace('app.asar', 'app.asar.unpacked');
+  }
+  return resolved;
 }

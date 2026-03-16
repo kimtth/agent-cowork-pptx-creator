@@ -1,6 +1,9 @@
 {
   "name": "pptx-slide-agent",
   "version": "0.1.0",
+  "author": {
+    "name": "kimtth"
+  },
   "description": "AI-powered PowerPoint automation agent",
   "private": true,
   "type": "module",
@@ -9,7 +12,11 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "dist": "pnpm setup:python-env && electron-vite build && pnpm exec electron-builder",
+    "dist:dir": "pnpm setup:python-env && electron-vite build && pnpm exec electron-builder --dir",
+    "dist:skip-venv": "pnpm verify:python-env && electron-vite build && pnpm exec electron-builder",
     "setup:python-env": "node scripts/setup-python.mjs",
+    "verify:python-env": "node scripts/verify-python-env.mjs",
     "test:connections": "node scripts/test-connections.mjs"
   },
   "dependencies": {
@@ -21,6 +28,7 @@
     "@iconify/react": "^6.0.2",
     "adm-zip": "^0.5.16",
     "archiver": "^7.0.1",
+    "balanced-match": "^4.0.4",
     "cheerio": "^1.2.0",
     "csv-parse": "^6.1.0",
     "jszip": "^3.10.1",
@@ -49,6 +57,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
     "electron": "^41.0.0",
+    "electron-builder": "^26.0.12",
     "electron-vite": "^5.0.0",
     "tailwindcss": "^4.2.1",
     "typescript": "^5.9.3",

@@ -1,25 +1,39 @@
-import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
+import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@github/copilot-sdk', '@github/copilot', 'vscode-jsonrpc', 'zod'] })],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),
       },
     },
     build: {
+      externalizeDeps: {
+        exclude: [
+          '@github/copilot-sdk',
+          '@github/copilot',
+          'vscode-jsonrpc',
+          'zod',
+          'archiver',
+          'adm-zip',
+          'jszip',
+          'cheerio',
+          'csv-parse',
+          'balanced-match',
+          'undici',
+        ],
+      },
       rollupOptions: {
         input: { main: path.resolve(__dirname, 'electron/main.ts') },
       },
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
     build: {
+      externalizeDeps: true,
       rollupOptions: {
         input: { preload: path.resolve(__dirname, 'electron/preload.ts') },
       },

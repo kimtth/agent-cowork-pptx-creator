@@ -76,7 +76,6 @@ web_modules/
 
 # Next.js build output
 .next
-out
 
 # Nuxt.js build / generate output
 .nuxt
@@ -128,7 +127,7 @@ dist
 
 # pnpm
 .pnpm-store
-.venv-markitdown/
+.venv/
 
 # yarn v3
 .pnp.*
@@ -375,3 +374,6 @@ temp/
 /skills/iconfy-list/cache/ph
 /skills/iconfy-list/cache/tabler
 .vscode/settings.json
+build-log.txt
+/samples/test
+/out

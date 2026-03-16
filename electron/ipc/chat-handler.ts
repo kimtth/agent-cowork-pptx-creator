@@ -30,7 +30,7 @@ import type { IconifyCollectionId } from '../../src/domain/icons/iconify';
 import { formatWorkflowForPrompt, getWorkflowConfig, type WorkflowConfig } from '../../src/domain/workflows/workflow-config';
 import { executeGeneratedPythonCodeToFile, formatExecutionFailure, computeLayoutSpecs, persistLayoutInputToWorkspace, persistSlideAssetsToWorkspace } from './pptx-handler.ts';
 import { buildManagedSystemPrompt } from './system-prompts.ts';
-import { readWorkspaceDir } from './workspace-utils.ts';
+import { readWorkspaceDir, resolveBundledPath } from './workspace-utils.ts';
 
 const CHAT_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -68,7 +68,7 @@ type SkillDirectoryEntry = {
 };
 
 async function listSkillDirectories(): Promise<SkillDirectoryEntry[]> {
-  const skillsRoot = path.join(app.getAppPath(), 'skills');
+  const skillsRoot = resolveBundledPath('skills');
   try {
     const entries = await fs.readdir(skillsRoot, { withFileTypes: true });
     return entries
@@ -174,17 +174,12 @@ async function readWorkflowMarkdown(workflow: WorkflowConfig | null, maxLen: num
  * Matches by style number prefix or fuzzy name match. Returns null if not found.
  */
 async function readDesignStyleBlock(styleName: string): Promise<string | null> {
-  const stylesPath = path.join(app.getAppPath(), 'skills', 'pptx-design-styles', 'references', 'styles.md');
+  const stylesPath = resolveBundledPath('skills', 'pptx-design-styles', 'references', 'styles.md');
   let content: string;
   try {
     content = await fs.readFile(stylesPath, 'utf-8');
   } catch {
-    // Fall back to cwd in dev mode
-    try {
-      content = await fs.readFile(path.join(process.cwd(), 'skills', 'pptx-design-styles', 'references', 'styles.md'), 'utf-8');
-    } catch {
-      return null;
-    }
+    return null;
   }
 
   // Split by H2 headers (## NN. StyleName)
@@ -618,9 +613,7 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
         };
         const basename = allowed[file];
         if (!basename) return null;
-        const candidate = path.join(app.getAppPath(), 'scripts', 'layout', basename);
-        if (fsExistsSync(candidate)) return candidate;
-        return path.join(process.cwd(), 'scripts', 'layout', basename);
+        return resolveBundledPath('scripts', 'layout', basename);
       };
 
       const patchLayoutInfrastructureTool = defineTool('patch_layout_infrastructure', {

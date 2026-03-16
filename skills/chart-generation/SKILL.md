@@ -47,7 +47,7 @@ These charts remain fully editable — the user can right-click → Edit Data.
 #### Code Pattern — Bar Chart
 
 ```python
-spec = get_layout_spec('chart')
+spec = PRECOMPUTED_LAYOUT_SPECS[slide_index]
 cr = spec.content_rect
 
 chart_data = CategoryChartData()
@@ -93,7 +93,7 @@ python-pptx's native chart API cannot express.
 #### Code Pattern — Heatmap
 
 ```python
-spec = get_layout_spec('chart')
+spec = PRECOMPUTED_LAYOUT_SPECS[slide_index]
 cr = spec.content_rect
 
 data = np.array([[10, 20, 30], [40, 50, 60], [70, 80, 90]])

@@ -7,7 +7,7 @@ import { promisify } from 'util'
 import type { ThemeTokens } from '../../src/domain/entities/palette'
 import { DEFAULT_THEME_C } from '../../src/domain/theme/default-theme'
 import { ensurePythonModule, pythonSetupHint, resolvePythonExecutable } from './python-runtime.ts'
-import { readWorkspaceDir } from './workspace-utils.ts'
+import { readWorkspaceDir, resolveBundledPath } from './workspace-utils.ts'
 
 const execFileAsync = promisify(execFile)
 const GENERATED_CODE_EXECUTION_ATTEMPTS = 2
@@ -150,10 +150,7 @@ async function ensureCleanDirectory(dirPath: string): Promise<void> {
 
 /** Resolve the icon PNG cache directory inside the app bundle (single source of truth). */
 function getAppIconCacheDir(): string {
-  const appPathCandidate = path.join(app.getAppPath(), 'skills', 'iconfy-list', 'cache')
-  if (existsSync(appPathCandidate)) return appPathCandidate
-  // In dev mode app.getAppPath() resolves to out/main; fall back to project root
-  return path.join(process.cwd(), 'skills', 'iconfy-list', 'cache')
+  return resolveBundledPath('skills', 'iconfy-list', 'cache')
 }
 
 function buildLayoutArtifactPaths(workspaceDir: string) {
@@ -281,10 +278,7 @@ export async function computeLayoutSpecs(
     }
     const { inputPath, outputPath } = persisted
 
-    let hybridScript = path.join(app.getAppPath(), 'scripts', 'layout', 'hybrid_layout.py')
-    if (!existsSync(hybridScript)) {
-      hybridScript = path.join(process.cwd(), 'scripts', 'layout', 'hybrid_layout.py')
-    }
+    const hybridScript = resolveBundledPath('scripts', 'layout', 'hybrid_layout.py')
 
     const python = await resolvePythonExecutable()
     const { stdout, stderr } = await execFileAsync(
@@ -319,10 +313,7 @@ export async function executeGeneratedPythonCodeToFile(
 ): Promise<void> {
   const workDir = path.dirname(outputPath)
   const sourcePath = path.join(workDir, 'generated-source.py')
-  let runnerScriptPath = path.join(app.getAppPath(), 'scripts', 'pptx-python-runner.py')
-  if (!existsSync(runnerScriptPath)) {
-    runnerScriptPath = path.join(process.cwd(), 'scripts', 'pptx-python-runner.py')
-  }
+  const runnerScriptPath = resolveBundledPath('scripts', 'pptx-python-runner.py')
 
   if (!existsSync(runnerScriptPath)) {
     throw new Error(`Python PPTX runner not found at ${runnerScriptPath}`)
@@ -341,6 +332,16 @@ export async function executeGeneratedPythonCodeToFile(
   const themePayload = JSON.stringify(theme?.C ?? DEFAULT_THEME_C)
   const workspaceDir = await readWorkspaceDir()
   await assertValidLayoutInputArtifact(workspaceDir)
+  let layoutSpecsJson = opts?.layoutSpecsJson?.trim() ?? ''
+  if (!layoutSpecsJson) {
+    const { inputPath } = buildLayoutArtifactPaths(workspaceDir)
+    const layoutInputJson = await fs.readFile(inputPath, 'utf-8')
+    const computed = await computeLayoutSpecs(layoutInputJson)
+    if (!computed.success || !computed.specs?.trim()) {
+      throw new Error(computed.error ?? 'Failed to compute hybrid layout specs.')
+    }
+    layoutSpecsJson = computed.specs.trim()
+  }
   const iconCacheDir = getAppIconCacheDir()
   const { slideAssetsPath } = buildLayoutArtifactPaths(workspaceDir)
   const slideAssetsJson = existsSync(slideAssetsPath)
@@ -373,7 +374,7 @@ export async function executeGeneratedPythonCodeToFile(
             ...(opts?.renderDir ? { PPTX_SKIP_COM_LAYOUT_FIX: '1' } : {}),
             ...(slideAssetsJson.trim() ? { PPTX_SLIDE_ASSETS_JSON: slideAssetsJson } : {}),
             WORKSPACE_DIR: workspaceDir,
-            ...(opts?.layoutSpecsJson ? { PPTX_LAYOUT_SPECS_JSON: opts.layoutSpecsJson } : {}),
+            PPTX_LAYOUT_SPECS_JSON: layoutSpecsJson,
           },
         },
       )
@@ -509,7 +510,7 @@ export function registerPptxHandlers(): void {
     }
   })
 
-  ipcMain.handle('pptx:renderPreview', async (_event, code: string, themeTokens: ThemeTokens | null, title: string, iconCollection?: string) => {
+  ipcMain.handle('pptx:renderPreview', async (_event, code: string, themeTokens: ThemeTokens | null, title: string, iconCollection?: string, slides?: SlideAssetSourceSlide[]) => {
     try {
       if (!code || typeof code !== 'string' || code.trim().length === 0) {
         return { success: false, error: 'code must not be empty' }
@@ -524,6 +525,11 @@ export function registerPptxHandlers(): void {
       const outputPath = path.join(previewRoot, 'presentation-preview.pptx')
 
       try {
+        // Always persist fresh slide-assets.json to prevent stale image references
+        if (slides && slides.length > 0) {
+          await persistSlideAssetsToWorkspace(slides, iconCollection ?? 'all')
+        }
+
         // Try to remove the old PPTX before regenerating; ignore if locked
         await fs.unlink(outputPath).catch(() => {})
         await removeStaleTimestampedPptx(previewRoot, 'presentation-preview.pptx')

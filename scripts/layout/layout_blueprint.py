@@ -7,8 +7,8 @@ and design tokens (margins, gaps, ratios).  The constraint solver
 coordinates for every zone at runtime based on actual text
 measurements from the PowerPoint COM engine.
 
-This replaces the 200+ lines of per-layout-type coordinate math in
-get_layout_spec() with ~10 lines of declarative structure per layout.
+This replaces the 200+ lines of per-layout-type coordinate math formerly in
+layout_specs.py with ~10 lines of declarative structure per layout.
 """
 
 from __future__ import annotations

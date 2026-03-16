@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Settings } from 'lucide-react'
 import { ThreePanelLayout } from './components/layout/ThreePanelLayout.tsx'
 import { ChatPanel } from './components/chat/ChatPanel.tsx'
@@ -10,14 +10,62 @@ import { useChatStore } from './stores/chat-store.ts'
 import { useSlidesStore } from './stores/slides-store.ts'
 import { usePaletteStore } from './stores/palette-store.ts'
 import { useProjectStore } from './stores/project-store.ts'
-import { createAssistantMessage, extractPptxCodeBlock } from './application/chat-use-case.ts'
+import { useDataSourcesStore } from './stores/data-sources-store.ts'
+import { createAssistantMessage, createUserMessage, historyToIpc, extractPptxCodeBlock } from './application/chat-use-case.ts'
+import { getAvailableIconChoices } from './domain/icons/iconify.ts'
+import { getWorkflowConfig } from './domain/workflows/workflow-config.ts'
 import type { FrameworkType } from './domain/entities/slide-work'
+
+const MAX_AUTO_RETRIES = 3
 
 export default function App() {
   const messages = useChatStore((s) => s.messages)
   const work = useSlidesStore((s) => s.work)
   const workspaceDir = useProjectStore((s) => s.workspaceDir)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const autoRetryCount = useRef(0)
+
+  const retryWithBuildError = (errMsg: string) => {
+    if (autoRetryCount.current >= MAX_AUTO_RETRIES) {
+      useChatStore.getState().addMessage(
+        createAssistantMessage(`🛑 Gave up after ${MAX_AUTO_RETRIES} automatic retries. Please review the error and try again manually.`),
+      )
+      return
+    }
+    autoRetryCount.current += 1
+    const attempt = autoRetryCount.current
+
+    useChatStore.getState().addMessage(
+      createAssistantMessage(`🔄 Auto-retry ${attempt}/${MAX_AUTO_RETRIES} — sending the error back to the agent…`),
+    )
+
+    const retryPrompt = `The PPTX generation failed with the following error. Please fix the code and try again:\n\n${errMsg}`
+    const userMsg = createUserMessage(retryPrompt)
+    useChatStore.getState().addMessage(userMsg)
+    useSlidesStore.getState().setStreaming(true)
+
+    const { work } = useSlidesStore.getState()
+    const { tokens, selectedIconCollection } = usePaletteStore.getState()
+    const { files: dataSources, urls: urlSources } = useDataSourcesStore.getState()
+    const availableIcons = getAvailableIconChoices(selectedIconCollection)
+    const workflow = getWorkflowConfig('create-pptx')
+
+    window.electronAPI.chat.send(retryPrompt, historyToIpc([...useChatStore.getState().messages]), {
+      title: work.title,
+      slides: work.slides,
+      designBrief: work.designBrief,
+      designStyle: work.designStyle,
+      framework: work.framework,
+      pptxBuildError: errMsg,
+      theme: tokens,
+      workflow,
+      dataSources,
+      urlSources,
+      iconProvider: 'iconify',
+      iconCollection: selectedIconCollection,
+      availableIcons,
+    })
+  }
 
   useEffect(() => {
     const api = window.electronAPI
@@ -57,9 +105,10 @@ export default function App() {
             useChatStore.getState().addMessage(
               createAssistantMessage('✅ PowerPoint code is ready. Generating the deck and preview images…'),
             )
-            window.electronAPI.pptx.renderPreview(code, paletteTokens, pptxTitle, selectedIconCollection)
+            window.electronAPI.pptx.renderPreview(code, paletteTokens, pptxTitle, selectedIconCollection, useSlidesStore.getState().work.slides)
               .then((result) => {
                 if (result.success) {
+                  autoRetryCount.current = 0
                   window.dispatchEvent(new CustomEvent('pptx-preview-ready'))
                   const warningNote = result.warning ? `\n\n⚠️ ${result.warning}` : ''
                   useChatStore.getState().addMessage(
@@ -71,6 +120,7 @@ export default function App() {
                   useChatStore.getState().addMessage(
                     createAssistantMessage(`⚠️ Deck generation failed: ${errMsg}`),
                   )
+                  retryWithBuildError(errMsg)
                 }
               })
               .catch((err: unknown) => {
@@ -79,6 +129,7 @@ export default function App() {
                 useChatStore.getState().addMessage(
                   createAssistantMessage(`⚠️ Deck generation failed: ${msg}`),
                 )
+                retryWithBuildError(msg)
               })
           } else {
             const message = hasCodeBlock

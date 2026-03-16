@@ -178,17 +178,12 @@ def solve_layout(
         if zd.fixed_h is not None:
             solver.addConstraint((zv.h == zd.fixed_h) | kiwi.strength.required)
 
-        # Measured text height as minimum — use strong (not required) for
-        # zones pinned near the bottom (NOTES, FOOTER) so the solver can
-        # compress them when text is too large for available space.
+        # Measured text height as minimum — use strong (not required) so
+        # the solver can compress zones when total measured heights exceed
+        # available slide space (e.g. slides with many items).
         mh = measured_heights.get(zd.role.value)
         if mh is not None and mh > zd.min_h:
-            strength = (
-                kiwi.strength.strong
-                if zd.role in (ZoneRole.NOTES, ZoneRole.FOOTER)
-                else kiwi.strength.required
-            )
-            solver.addConstraint((zv.h >= mh) | strength)
+            solver.addConstraint((zv.h >= mh) | kiwi.strength.strong)
 
     # Sequential ordering (each zone starts after the previous one ends + gap)
     for i in range(1, len(zvs)):

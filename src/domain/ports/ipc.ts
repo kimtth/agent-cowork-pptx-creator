@@ -120,6 +120,7 @@ export interface IpcPptxAPI {
     themeTokens: ThemeTokens | null,
     title: string,
     iconCollection?: string,
+    slides?: Array<{ number: number; title: string; layout: string; icon?: string | null; imageQuery?: string | null; imageQueries?: string[]; imagePath?: string | null; selectedImages?: Array<{ id: string; imageQuery?: string | null; imageUrl?: string | null; imagePath?: string | null; thumbnailUrl?: string | null }> }>,
   ): Promise<{ success: boolean; imagePaths?: string[]; error?: string; warning?: string }>;
   readExistingPreviews(): Promise<{ success: boolean; imagePaths: string[] }>;
 }

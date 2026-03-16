@@ -5,6 +5,7 @@ import { promisify } from 'util';
 import { execFile } from 'child_process';
 import type { DataFile, ScrapeResult, SourceArtifact } from '../../src/domain/ports/ipc';
 import { readWorkspaceDir } from './workspace-utils.ts';
+import { resolveBundledPath } from './workspace-utils.ts';
 import { resolvePythonExecutable } from './python-runtime.ts';
 
 const execFileAsync = promisify(execFile);
@@ -49,7 +50,7 @@ async function ensureArtifactsDir(): Promise<string> {
 }
 
 function markitdownScriptPath(): string {
-  return path.resolve(process.cwd(), 'scripts', 'markitdown_convert.py');
+  return resolveBundledPath('scripts', 'markitdown_convert.py');
 }
 
 async function runMarkItDown(source: string): Promise<ConversionResult> {

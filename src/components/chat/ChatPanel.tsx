@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Loader2, X, ChevronDown, ChevronRight, FileCode2, Lightbulb } from 'lucide-react'
+import { Send, Loader2, X, ChevronDown, ChevronRight, FileCode2, Lightbulb, Trash2 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useChatStore } from '../../stores/chat-store'
@@ -120,6 +120,7 @@ export function ChatPanel() {
 
   const messages = useChatStore((s) => s.messages)
   const addMessage = useChatStore((s) => s.addMessage)
+  const clearMessages = useChatStore((s) => s.clear)
   const removeMessage = useChatStore((s) => s.removeMessage)
   const { work, setStreaming } = useSlidesStore()
   const streaming = work.isStreaming
@@ -192,6 +193,11 @@ export function ChatPanel() {
     window.electronAPI.chat.cancel()
   }
 
+  const clearChatHistory = () => {
+    if (streaming || messages.length === 0) return
+    clearMessages()
+  }
+
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -203,10 +209,22 @@ export function ChatPanel() {
     <div className="flex h-full min-h-0 flex-col gap-3 p-3" style={{ background: 'var(--panel-bg)' }}>
       {/* Header */}
       <div
-        className="flex-none flex items-center px-4 border text-sm font-semibold"
+        className="flex-none flex items-center justify-between gap-3 px-4 border text-sm font-semibold"
         style={{ color: 'var(--text-primary)', borderColor: 'var(--panel-border)', background: 'var(--surface)', height: 40, minHeight: 40 }}
       >
-        Chat
+        <span>Chat</span>
+        <button
+          type="button"
+          onClick={clearChatHistory}
+          disabled={streaming || messages.length === 0}
+          className="flex shrink-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-widest transition-opacity disabled:opacity-40"
+          style={{ color: 'var(--text-muted)' }}
+          aria-label="Clear chat history"
+          title="Clear chat history"
+        >
+          <Trash2 size={12} />
+          <span>Clear</span>
+        </button>
       </div>
 
       {/* Messages */}

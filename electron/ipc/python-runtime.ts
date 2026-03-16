@@ -1,30 +1,34 @@
 import fs from 'fs/promises'
 import path from 'path'
 import { existsSync } from 'fs'
+import { app } from 'electron'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { getAppResourceRoots } from './workspace-utils.ts'
 
 const execFileAsync = promisify(execFile)
 
 function localPythonCandidates(): string[] {
-  const baseDirs = [
-    path.resolve(process.cwd(), '.venv'),
-    path.resolve(process.cwd(), '.venv-markitdown'),
-  ]
+  const baseDirs = getAppResourceRoots().flatMap((root) => [
+    path.join(root, '.venv'),
+    path.join(root, 'venv'),
+  ]).filter((baseDir, index, values) => values.indexOf(baseDir) === index)
+
   return process.platform === 'win32'
     ? baseDirs.map((baseDir) => path.join(baseDir, 'Scripts', 'python.exe'))
     : baseDirs.map((baseDir) => path.join(baseDir, 'bin', 'python'))
 }
 
 export function pythonSetupHint(): string {
-  return 'Run "pnpm setup:python-env" or set PPTX_SLIDE_AGENT_PYTHON to a working Python 3.10+ interpreter.'
+  if (app.isPackaged) {
+    return 'The packaged app needs a bundled .venv under the app resources directory. Rebuild with an existing .venv.'
+  }
+
+  return 'Run "pnpm setup:python-env" to prepare .venv.'
 }
 
 export async function resolvePythonExecutable(): Promise<string> {
   const candidates: string[] = []
-
-  const explicit = process.env.PPTX_SLIDE_AGENT_PYTHON?.trim()
-  if (explicit) candidates.push(explicit)
 
   candidates.push(...localPythonCandidates())
 

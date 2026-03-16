@@ -20,7 +20,35 @@ The output `LayoutSpec` provides `RectSpec(x, y, w, h)` for every element zone (
 
 The workspace keeps both sides of this contract in `previews/`: `layout-input.json` stores the storyboard-derived `SlideContent[]` input, and `layout-specs.json` stores the computed `LayoutSpec[]` output.
 
-When the hybrid engine is unavailable or precomputation fails, the runtime falls back to the static templates in `layout_specs.py` via `get_layout_spec()` and, for text-driven cascading, `flow_layout_spec()`.
+When the hybrid engine is unavailable or precomputation fails, the runtime raises a `RuntimeError`. Generated code must always use `PRECOMPUTED_LAYOUT_SPECS`.
+
+---
+
+## Import Convention (Critical)
+
+The layout modules (`layout_blueprint.py`, `layout_specs.py`, `constraint_solver.py`, `hybrid_layout.py`, `com_text_measure.py`) all live in `scripts/layout/` and import each other using **bare** module names:
+
+```python
+from layout_blueprint import ZoneRole, get_blueprint
+from layout_specs import LayoutSpec, flow_layout_spec
+from constraint_solver import solve_layout
+```
+
+Any external caller that needs the layout engine **must** add `scripts/layout/` to `sys.path` and use the same bare imports. **Never** mix qualified (`scripts.layout.layout_blueprint`) and bare (`layout_blueprint`) import paths in the same process.
+
+**Why**: Python treats `scripts.layout.layout_blueprint` and `layout_blueprint` as two separate modules, even though they point to the same file. This creates two independent copies of every class and enum. `ZoneRole.NOTES` from one copy is **not equal** to `ZoneRole.NOTES` from the other, which silently breaks all role-based constraint solver logic (notes pinning, accent gap, stretch targeting).
+
+```python
+# ✅ CORRECT — add scripts/layout/ to sys.path, use bare imports
+import sys
+sys.path.insert(0, str(Path('scripts/layout')))
+from layout_blueprint import ZoneRole, get_blueprint
+from constraint_solver import solve_layout
+
+# ❌ WRONG — qualified import creates a second module identity
+from scripts.layout.layout_blueprint import ZoneRole  # different ZoneRole!
+from scripts.layout.constraint_solver import solve_layout  # solver uses bare ZoneRole
+```
 
 ---
 
@@ -401,9 +429,8 @@ The final generated Python code does not talk to the layout engine directly. Ins
 
 | Symbol | Purpose |
 |--------|---------|
-| `PRECOMPUTED_LAYOUT_SPECS` | Preferred list of measured `LayoutSpec` objects from the hybrid engine |
-| `get_layout_spec()` | Compatibility fallback that returns static `LayoutSpec` templates |
-| `flow_layout_spec()` | Compatibility helper that cascades title/key-message-driven vertical placement |
+| `PRECOMPUTED_LAYOUT_SPECS` | Required list of measured `LayoutSpec` objects from the hybrid engine |
+| `flow_layout_spec()` | Cascade helper used internally by the layout engine |
 | `LayoutSpec`, `RectSpec`, `CardsSpec`, `StatsSpec`, `TimelineSpec`, `ComparisonSpec` | Dataclasses used by generated code |
 | `SLIDE_ASSETS`, `slide_assets()`, `slide_image_paths()` | Approved per-slide asset metadata and helpers for selected images |
 | `PPTX_ICON_COLLECTION` | Active icon collection identifier enforced by the runtime |
@@ -435,18 +462,10 @@ This keeps the generated deck aligned with the user's chosen images and icon set
 Generated code should prefer:
 
 ```python
-if PRECOMPUTED_LAYOUT_SPECS is not None:
-  spec = PRECOMPUTED_LAYOUT_SPECS[i]
-else:
-  base_spec = get_layout_spec(layout_type, has_icon=bool(slide_icon))
-  spec = flow_layout_spec(
-    base_spec,
-    title_text=slide_title,
-    key_message_text=slide_key_message,
-  )
+spec = PRECOMPUTED_LAYOUT_SPECS[i]
 ```
 
-This ensures the measured, solver-backed geometry is used whenever available, while preserving a safe compatibility path if precomputation fails.
+The hybrid engine always computes specs before generation. `PRECOMPUTED_LAYOUT_SPECS` is guaranteed to be available.
 
 ### Text Frame Rule
 
@@ -503,9 +522,13 @@ Shapes are excluded from collision checks based on heuristics such as shape type
 
 `TEXT_TO_FIT_SHAPE` can save a deck from catastrophic overflow, but it may reduce fonts to unreadable sizes. The preferred strategy remains: measure first, solve geometry second, render third.
 
-### 6. Static Fallback Specs Are Compatibility Templates
+### 6. Static Template Helpers Have Been Removed
 
-`get_layout_spec()` and `flow_layout_spec()` remain important compatibility helpers, but they are still hand-authored templates. They intentionally share the same `LayoutSpec` contract as the hybrid engine, yet some coordinates remain historical approximations rather than exact matches for the blueprint-solved path. For production-quality placement, `PRECOMPUTED_LAYOUT_SPECS` should win whenever it is present.
+The former `get_layout_spec()` function and its static coordinate templates have been removed. All layout computation now goes through the blueprint → constraint solver pipeline. `PRECOMPUTED_LAYOUT_SPECS` is the only supported path for generated code.
+
+### 7. Import Path Must Use Bare Module Names
+
+External callers must use bare imports (`from layout_blueprint import ...`) after adding `scripts/layout/` to `sys.path`. Mixing qualified paths (`scripts.layout.layout_blueprint`) with the layout modules' bare imports creates duplicate `ZoneRole` enum classes, silently disabling all role-based solver constraints. See the "Import Convention" section above for details.
 
 ---
 

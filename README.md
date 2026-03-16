@@ -55,6 +55,8 @@ This creates `.venv` and installs the dependencies declared in [pyproject.toml](
 
 `pnpm setup:python-env` is available as an alias for the same environment setup.
 
+For packaged builds, `.venv` is bundled into the app's `resources` directory. `pnpm dist:skip-venv` only skips recreating the environment; it still requires an existing `.venv` in the repo root and now fails fast if that environment is missing.
+
 ### python-pptx
 
 https://python-pptx.readthedocs.io/
@@ -95,7 +97,7 @@ pptx-handler.ts
 | `layout_blueprint.py` | Declarative zone definitions for 10 layout types |
 | `com_text_measure.py` | PowerPoint COM AutoFit text height measurement (Windows) |
 | `constraint_solver.py` | Kiwisolver (Cassowary) constraint solver → `LayoutSpec` |
-| `layout_specs.py` | `LayoutSpec` / `RectSpec` dataclasses and fallback `get_layout_spec()` |
+| `layout_specs.py` | `LayoutSpec` / `RectSpec` dataclasses and `flow_layout_spec()` cascade helper |
 | `layout_validator.py` | Post-generation validation (overlap, bounds, text overflow) |
 
 Pre-computed specs are injected as `PRECOMPUTED_LAYOUT_SPECS` into the generated code namespace. Requires `kiwisolver` and `pywin32` (Windows + PowerPoint).
