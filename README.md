@@ -151,8 +151,6 @@ App data is stored in the Electron `userData` directory:
 | `settings.json` | `%APPDATA%\pptx-slide-agent\settings.json` | API keys, model settings, and other preferences |
 | `workspace.json` | `%APPDATA%\pptx-slide-agent\workspace.json` | Last-used workspace directory |
 
-On macOS the equivalent path is `~/Library/Application Support/pptx-slide-agent/`.
-
 ### Project Files
 
 Work can be saved and loaded as `.pptapp` project files (JSON). A project snapshot includes:
