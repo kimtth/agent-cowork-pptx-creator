@@ -4,6 +4,12 @@ Electron desktop app for generating PowerPoint decks from chat, files, and URLs 
 
 <img src="./samples/main.png" alt="main screen" width="500" />
 
+## Documentation Index
+
+- [Quick Start (English)](./QUICK_START.md)
+- [Quick Start (Japanese)](./QUICK_START_JP.md)
+- [Layout Engine Whitepaper](./LAYOUT_ENGINE.md)
+
 ## Getting Started
 
 Requirements:
@@ -75,7 +81,7 @@ AZURE_TENANT_ID=your_tenant_id
 
 Notes:
 
-- For GitHub-hosted models, use a token with Copilot entitlement.
+- For [GitHub-hosted models](https://models.github.ai/catalog/models), use a token with Copilot entitlement.
 - For Azure, use the full base URL including `/openai/v1`.
 - `MODEL_NAME` can be a GitHub-hosted model such as `gpt-5.4` or an Azure deployment/model name.
 
