@@ -10,18 +10,10 @@ import path from 'path';
 const CONFIG_FILE = path.join(app.getPath('userData'), 'settings.json');
 
 export const SETTINGS_KEYS = [
-  'LLM_PROVIDER',
-  'COPILOT_MODEL_SOURCE',
   'GITHUB_TOKEN',
-  'AZURE_OPENAI_ENDPOINT',
-  'AZURE_OPENAI_API_KEY',
-  'AZURE_TENANT_ID',
-  'OPENAI_API_KEY',
-  'ANTHROPIC_API_KEY',
   'MODEL_NAME',
   'REASONING_EFFORT',
   'SHOW_TOOL_CALLING_MESSAGES',
-
 ] as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[number];
@@ -52,11 +44,11 @@ export async function applySettingsToEnv(): Promise<void> {
   }
 }
 
-let onSaveCallback: (() => void) | null = null;
+const onSaveCallbacks = new Set<() => void>();
 
-/** Register a callback to be called when settings are saved (e.g. reset Copilot client). */
+/** Register a callback to be called when settings are saved. */
 export function onSettingsSaved(cb: () => void): void {
-  onSaveCallback = cb;
+  onSaveCallbacks.add(cb);
 }
 
 export function registerSettingsHandlers(): void {
@@ -91,7 +83,7 @@ export function registerSettingsHandlers(): void {
     }
 
     await writeSettings(clean);
-    onSaveCallback?.();
+    for (const callback of onSaveCallbacks) callback();
 
     for (const win of BrowserWindow.getAllWindows()) {
       if (!win.isDestroyed() && !win.webContents.isDestroyed()) {

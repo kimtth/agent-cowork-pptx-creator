@@ -12,12 +12,10 @@ import fs from 'fs/promises';
 import { existsSync as fsExistsSync } from 'fs';
 import path from 'path';
 import { onSettingsSaved } from '../config/settings-handler.ts';
-import type { LLMToolDefinition, LLMSessionConfig } from './llm-provider.ts';
-import { getActiveProvider, resetAllProviders, registerProvider } from './llm-provider.ts';
+import type { LLMToolDefinition, LLMSessionConfig, LLMUsageSummary } from './llm-provider.ts';
 import type { LLMSession, LLMStreamDelta } from './llm-provider.ts';
 import { resolveWorkflowInstructionPath } from './copilot-runtime.ts';
 import { copilotProvider } from './copilot-adapter.ts';
-import { openaiProvider, azureOpenAIProvider, claudeProvider } from './aisdk-adapter.ts';
 import type { ThemeTokens } from '../../../src/domain/entities/palette';
 import type {
   SlideItem,
@@ -793,14 +791,7 @@ function sendToWindow(win: BrowserWindow, channel: string, ...args: unknown[]): 
 // ---------------------------------------------------------------------------
 
 export function registerChatHandlers(getWindow: () => BrowserWindow | null): void {
-  // Register all LLM providers
-  registerProvider('copilot', copilotProvider);
-  registerProvider('openai', openaiProvider);
-  registerProvider('azure-openai', azureOpenAIProvider);
-  registerProvider('claude', claudeProvider);
-
-  // Reset all provider clients whenever the user saves new settings
-  onSettingsSaved(() => { resetAllProviders(); });
+  onSettingsSaved(() => { copilotProvider.reset(); });
 
   ipcMain.on('chat:cancel', () => {
     activeChatRequest?.cancel('Generation cancelled.');
@@ -865,7 +856,7 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       let lastActivityTime = Date.now();
       let requestStartedAt = Date.now();
-      let llmUsageSummary: import('./llm-provider.ts').LLMUsageSummary | null = null;
+      const llmUsageSummaries: LLMUsageSummary[] = [];
 
       const clearRequestTimeout = () => {
         if (!timeoutHandle) return;
@@ -960,7 +951,7 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
         },
       });
 
-      // Tool definitions (provider-neutral — close over win for IPC emission)
+      // Tool definitions close over win for IPC emission.
       const scenarioTool: LLMToolDefinition = {
         name: 'set_scenario',
         description:
@@ -1825,7 +1816,6 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
       };
 
       try {
-        const provider = getActiveProvider();
         const sessionMode: SessionMode = resolveSessionMode(message, workspace, workflow);
         const skillDirectories = await getSkillDirectories(sessionMode, workflow);
 
@@ -1842,13 +1832,13 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
           } else if (delta.type === 'thinking') {
             sendToWindow(win, 'chat:stream', { thinking: delta.text });
           } else if (delta.type === 'usage') {
-            llmUsageSummary = delta.usage;
+            llmUsageSummaries.push(delta.usage);
           } else if (delta.type === 'error') {
             failRequest(delta.message);
           }
         };
 
-        session = await provider.createSession(sessionConfig, onDelta);
+        session = await copilotProvider.createSession(sessionConfig, onDelta);
 
         const timeoutPromise = new Promise<never>((_, reject) => {
           const startTime = Date.now();
@@ -1874,24 +1864,25 @@ export function registerChatHandlers(getWindow: () => BrowserWindow | null): voi
           timeoutPromise,
         ]);
 
-        if (llmUsageSummary) {
+        const usageSummary = llmUsageSummaries.at(-1);
+        if (usageSummary) {
           emitToolEvent({
             id: `llm_usage-${Date.now()}`,
             toolName: 'llm_usage',
             status: 'success',
             argsPreview: previewToolValue({
-              provider: llmUsageSummary.provider,
-              model: llmUsageSummary.model,
-              finishReason: llmUsageSummary.finishReason,
+              provider: usageSummary.provider,
+              model: usageSummary.model,
+              finishReason: usageSummary.finishReason,
             }),
             resultPreview: previewToolValue({
-              inputTokens: llmUsageSummary.inputTokens,
-              outputTokens: llmUsageSummary.outputTokens,
-              totalTokens: llmUsageSummary.totalTokens,
-              reasoningTokens: llmUsageSummary.reasoningTokens,
-              cacheReadTokens: llmUsageSummary.cacheReadTokens,
-              cacheWriteTokens: llmUsageSummary.cacheWriteTokens,
-              ...(typeof llmUsageSummary.cost === 'number' ? { cost: llmUsageSummary.cost } : {}),
+              inputTokens: usageSummary.inputTokens,
+              outputTokens: usageSummary.outputTokens,
+              totalTokens: usageSummary.totalTokens,
+              reasoningTokens: usageSummary.reasoningTokens,
+              cacheReadTokens: usageSummary.cacheReadTokens,
+              cacheWriteTokens: usageSummary.cacheWriteTokens,
+              ...(typeof usageSummary.cost === 'number' ? { cost: usageSummary.cost } : {}),
             }),
             startedAt: requestStartedAt,
             finishedAt: Date.now(),

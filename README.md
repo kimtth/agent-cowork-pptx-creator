@@ -1,6 +1,6 @@
 # agent-pptx-mini-notebooklm
 
-Electron desktop app for generating PowerPoint decks from chat, files, and URLs with support for GitHub Copilot, OpenAI, Azure OpenAI, and Claude.
+Electron desktop app for generating PowerPoint decks from chat, files, and URLs with GitHub Copilot.
 
 <p align="center">
     <img src="./samples/main.png" alt="main screen" width="500" />
@@ -60,7 +60,7 @@ Requirements:
 
 - Node.js with `pnpm`
 - `uv` and Python 3.13+
-- credentials for at least one supported model provider
+- a GitHub token for an account with Copilot access
 - Microsoft PowerPoint on Windows (Optional) — required for local preview images only; layout measurement uses Pillow font metrics. See [the details](#text-height-measurement)
 
 Install dependencies:
@@ -75,15 +75,7 @@ Set up the Python environment once:
 uv sync
 ```
 
-Before running the app, decide which provider you want to use in Settings:
-
-- GitHub Copilot with GitHub-hosted models
-- GitHub Copilot with your own Azure OpenAI or Foundry deployment
-- OpenAI
-- Azure OpenAI
-- Claude
-
-**Recommended option** for most users: **GitHub Copilot with GitHub-hosted models**. It has the simplest setup in this app and is the most tested path.
+Before running the app, open Settings and enter your GitHub token and preferred GitHub-hosted Copilot model.
 
 Run the development server:
 
@@ -109,23 +101,18 @@ pnpm dist:skip-venv
 - **Classic PAT** — no specific scope needed; the account must have an active Copilot subscription.
 - **Fine-grained PAT** — Under "Permissions," click Add permissions and select **Copilot Requests**.
 
-Choose the provider in Settings first, then enter only the matching fields:
+Enter these fields in Settings:
 
-- `GitHub Copilot` + `GitHub-hosted models`: `GITHUB_TOKEN`, `MODEL_NAME`
-- `GitHub Copilot` + `Self-serving Azure OpenAI / Foundry`: `GITHUB_TOKEN`, `COPILOT_MODEL_SOURCE`, `MODEL_NAME`, Azure connection details
-- `Azure OpenAI`: `MODEL_NAME`, Azure connection details
-- `OpenAI`: `MODEL_NAME`, `OPENAI_API_KEY`
-- `Claude`: `MODEL_NAME`, `ANTHROPIC_API_KEY`
+- `GITHUB_TOKEN`
+- `MODEL_NAME`
 
-`REASONING_EFFORT` is optional for all providers.
+`REASONING_EFFORT` is optional.
 `SHOW_TOOL_CALLING_MESSAGES` is optional and controls whether chat shows tool execution entries such as `tweak_slide`, `patch_layout_infrastructure`, and `rerun_pptx`.
 
 Notes:
 
 - For [GitHub Copilot hosted models](https://docs.github.com/en/copilot/reference/ai-models/model-hosting), use a token with Copilot entitlement.
-- For Copilot with self-serving Azure, set `LLM_PROVIDER=copilot` and `COPILOT_MODEL_SOURCE=azure-openai`, then provide your Azure endpoint and authentication details in Settings.
-- For Azure, use the full base URL including `/openai/v1`.
-- `MODEL_NAME` can be a GitHub-hosted model name, an Azure deployment name, or another provider-specific model identifier.
+- `MODEL_NAME` is a GitHub-hosted Copilot model identifier.
 
 ## Python Environment
 
@@ -242,7 +229,7 @@ Prompt workflow files live here:
 - [workflows/create-pptx.md](workflows/create-pptx.md)
 - [workflows/poststaging.md](workflows/poststaging.md)
 
-Workflow loading is provider-neutral. The provider-specific runtime wiring lives in [electron/ipc/llm](electron/ipc/llm).
+Workflow loading is shared across chat modes. The Copilot runtime wiring lives in [electron/ipc/llm](electron/ipc/llm).
 
 ## NotebookLM Integration
 

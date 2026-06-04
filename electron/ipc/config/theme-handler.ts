@@ -177,7 +177,6 @@ function extractSessionText(result: unknown): string {
 }
 
 let clientInstance: CopilotClient | null = null;
-const AZURE_OPENAI_SCOPE = 'https://cognitiveservices.azure.com/.default';
 const PALETTE_TIMEOUT_MS = 180_000;
 
 function getClient(): CopilotClient {
@@ -198,47 +197,8 @@ function getClient(): CopilotClient {
 }
 
 async function getPaletteSessionOptions(): Promise<Partial<SessionConfig>> {
-  const endpoint = process.env.AZURE_OPENAI_ENDPOINT?.trim();
   const modelName = process.env.MODEL_NAME;
-  const useAzureOpenAI = Boolean(endpoint);
-  const useGitHubModels = !useAzureOpenAI;
-
-  if (!modelName && !useAzureOpenAI) return { streaming: false };
-  if (useGitHubModels) {
-    return { ...(modelName ? { model: modelName } : {}), streaming: false };
-  }
-
-  if (useAzureOpenAI) {
-    if (!endpoint || !modelName) {
-      throw new Error('AZURE_OPENAI_ENDPOINT and MODEL_NAME are required to use Azure OpenAI / Foundry model serving');
-    }
-
-    const apiKey = process.env.AZURE_OPENAI_API_KEY;
-    let auth: { apiKey?: string; bearerToken?: string };
-    if (apiKey && apiKey.trim()) {
-      auth = { apiKey: apiKey.trim() };
-    } else {
-      const { DefaultAzureCredential } = await import('@azure/identity');
-      const tenantId = process.env.AZURE_TENANT_ID?.trim() || undefined;
-      const credential = new DefaultAzureCredential(tenantId ? { tenantId } : undefined);
-      const tokenResult = await credential.getToken(AZURE_OPENAI_SCOPE);
-      if (!tokenResult) throw new Error('Failed to acquire Azure bearer token. Set AZURE_OPENAI_API_KEY or run "az login".');
-      auth = { bearerToken: tokenResult.token };
-    }
-
-    return {
-      model: modelName,
-      streaming: false,
-      provider: {
-        type: 'openai',
-        baseUrl: endpoint.replace(/\/$/, ''),
-        ...auth,
-        wireApi: 'completions',
-      },
-    };
-  }
-
-  throw new Error('Invalid model session configuration.');
+  return { ...(modelName ? { model: modelName } : {}), streaming: false };
 }
 
 async function generatePaletteWithLLM(seeds: string[]): Promise<PaletteColor[]> {

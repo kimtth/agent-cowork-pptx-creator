@@ -1,23 +1,21 @@
 /**
  * LLM Provider Contract
  *
- * Normalized interface for chat/streaming/tool-calling across multiple
- * LLM backends.  The chat handler uses this contract exclusively —
- * provider-specific details live in adapter modules.
+ * Normalized interface for chat/streaming/tool-calling through GitHub Copilot.
  */
 
 // ---------------------------------------------------------------------------
-// Tool definition — provider-neutral
+// Tool definition
 // ---------------------------------------------------------------------------
 
-/** JSON Schema object for tool parameters (OpenAI function-calling style). */
+/** JSON Schema object for tool parameters. */
 export type ToolParametersSchema = {
   type: 'object';
   properties: Record<string, unknown>;
   required?: string[];
 };
 
-/** Provider-neutral tool definition. */
+/** Tool definition exposed to Copilot. */
 export interface LLMToolDefinition {
   name: string;
   description: string;
@@ -26,7 +24,7 @@ export interface LLMToolDefinition {
 }
 
 export interface LLMUsageSummary {
-  provider: ProviderType;
+  provider: 'copilot';
   model?: string;
   inputTokens?: number;
   outputTokens?: number;
@@ -55,11 +53,11 @@ export type LLMStreamDelta =
 export interface LLMSessionConfig {
   /** System prompt (appended or replaced depending on provider). */
   systemMessage: string;
-  /** Provider-neutral tool definitions. */
+  /** Tool definitions exposed to Copilot. */
   tools: LLMToolDefinition[];
-  /** Skill / instruction directories (Copilot-only; others inline into systemMessage). */
+  /** Skill / instruction directories passed to Copilot. */
   skillDirectories?: string[];
-  /** Model name or deployment (interpretation is provider-specific). */
+  /** GitHub-hosted Copilot model name. */
   model?: string;
   /** Enable streaming. */
   streaming?: boolean;
@@ -108,41 +106,3 @@ export interface LLMProvider {
   reset(): void;
 }
 
-// ---------------------------------------------------------------------------
-// Provider registry
-// ---------------------------------------------------------------------------
-
-export type ProviderType = 'copilot' | 'azure-openai' | 'openai' | 'claude';
-
-const registry = new Map<ProviderType, LLMProvider>();
-
-export function registerProvider(type: ProviderType, provider: LLMProvider): void {
-  registry.set(type, provider);
-}
-
-export function getProvider(type: ProviderType): LLMProvider {
-  const p = registry.get(type);
-  if (!p) throw new Error(`LLM provider "${type}" is not registered.`);
-  return p;
-}
-
-/** Resolve the active provider type from environment / settings. */
-export function resolveActiveProviderType(): ProviderType {
-  const explicit = process.env.LLM_PROVIDER?.trim().toLowerCase();
-  if (explicit === 'openai' || explicit === 'claude' || explicit === 'azure-openai') {
-    return explicit as ProviderType;
-  }
-  // Legacy detection: AZURE_OPENAI_ENDPOINT without explicit provider → azure-openai
-  if (process.env.AZURE_OPENAI_ENDPOINT?.trim()) return 'azure-openai';
-  // Default
-  return 'copilot';
-}
-
-export function getActiveProvider(): LLMProvider {
-  return getProvider(resolveActiveProviderType());
-}
-
-/** Reset all registered providers (used on settings change). */
-export function resetAllProviders(): void {
-  for (const p of registry.values()) p.reset();
-}

@@ -16,7 +16,6 @@ export default defineConfig({
           '@github/copilot-sdk',
           '@github/copilot',
           'vscode-jsonrpc',
-          'zod',
           'archiver',
           'adm-zip',
           'jszip',

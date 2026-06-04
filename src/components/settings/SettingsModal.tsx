@@ -1,9 +1,6 @@
-/**
- * SettingsModal: LLM provider configuration
- * Supports GitHub Copilot, Azure OpenAI, OpenAI, and Claude providers.
- */
+/** SettingsModal: GitHub Copilot configuration. */
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Save, Loader2, Eye, EyeOff } from 'lucide-react'
 
 interface Props {
@@ -17,94 +14,23 @@ type SettingsField = {
   secret?: boolean
   hint?: string
   options?: Array<{ value: string; label: string }>
-  /** Show this field only when LLM_PROVIDER matches one of these values (empty = always). */
-  providers?: string[]
   /** When true, the field is optional and shows an "Optional" badge. */
   optional?: boolean
 }
 
-const PROVIDER_OPTIONS = [
-  { value: 'copilot', label: 'GitHub Copilot' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'azure-openai', label: 'Azure OpenAI' },
-  { value: 'claude', label: 'Claude (Anthropic)' },
-]
-
 const FIELDS: SettingsField[] = [
-  {
-    key: 'LLM_PROVIDER',
-    label: 'LLM Provider',
-    hint: 'Select the AI provider. Each provider requires its own credentials below.',
-    options: PROVIDER_OPTIONS,
-  },
-  // --- Copilot ---
-  {
-    key: 'COPILOT_MODEL_SOURCE',
-    label: 'Copilot Model Source',
-    hint: 'Use GitHub-hosted models by default. Switch to Azure only when you want to use your own Azure OpenAI or Foundry deployment through the Copilot provider.',
-    options: [
-      { value: 'github-hosted', label: 'GitHub-hosted models' },
-      { value: 'azure-openai', label: 'Self-serving Azure OpenAI / Foundry' },
-    ],
-    providers: ['copilot'],
-  },
   {
     key: 'GITHUB_TOKEN',
     label: 'GitHub Token',
     placeholder: 'ghp_...',
     secret: true,
-    hint: 'GitHub PAT with Copilot entitlement. Required when using the GitHub Copilot provider.',
-    providers: ['copilot'],
+    hint: 'GitHub PAT with Copilot entitlement.',
   },
-  // --- OpenAI ---
-  {
-    key: 'OPENAI_API_KEY',
-    label: 'OpenAI API Key',
-    placeholder: 'sk-...',
-    secret: true,
-    hint: 'API key from platform.openai.com.',
-    providers: ['openai'],
-  },
-  // --- Azure OpenAI ---
-  {
-    key: 'AZURE_OPENAI_ENDPOINT',
-    label: 'Azure OpenAI Endpoint',
-    placeholder: 'https://your-resource.openai.azure.com/openai/v1',
-    hint: 'Use the full v1 base URL, including /openai/v1.',
-    providers: ['azure-openai'],
-  },
-  {
-    key: 'AZURE_OPENAI_API_KEY',
-    label: 'Azure OpenAI API Key',
-    placeholder: 'Leave empty to use DefaultAzureCredential (az login)',
-    secret: true,
-    hint: 'API key for Azure OpenAI. Optional if using Azure CLI or managed identity.',
-    providers: ['azure-openai'],
-    optional: true,
-  },
-  {
-    key: 'AZURE_TENANT_ID',
-    label: 'Azure Tenant ID',
-    placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
-    hint: 'Required when you have multiple tenants.',
-    providers: ['azure-openai'],
-    optional: true,
-  },
-  // --- Claude ---
-  {
-    key: 'ANTHROPIC_API_KEY',
-    label: 'Anthropic API Key',
-    placeholder: 'sk-ant-...',
-    secret: true,
-    hint: 'API key from console.anthropic.com.',
-    providers: ['claude'],
-  },
-  // --- Shared ---
   {
     key: 'MODEL_NAME',
     label: 'Model Name',
     placeholder: 'gpt-5.4-mini',
-    hint: 'Model identifier or Azure deployment name. Provider-specific.',
+    hint: 'GitHub-hosted Copilot model identifier.',
   },
   {
     key: 'REASONING_EFFORT',
@@ -138,56 +64,19 @@ export function SettingsModal({ onClose }: Props) {
   const [showSecret, setShowSecret] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const selectedProvider = values.LLM_PROVIDER || 'copilot'
-  const copilotModelSource = values.COPILOT_MODEL_SOURCE || 'github-hosted'
-
-  const visibleFields = useMemo(() => {
-    return FIELDS.filter((field) => {
-      if (field.key.startsWith('AZURE_OPENAI_') || field.key === 'AZURE_TENANT_ID') {
-        return selectedProvider === 'azure-openai'
-          || (selectedProvider === 'copilot' && copilotModelSource === 'azure-openai')
-      }
-
-      if (!field.providers || field.providers.length === 0) return true
-      return field.providers.includes(selectedProvider)
-    })
-  }, [copilotModelSource, selectedProvider])
-
   function getFieldValue(key: string): string {
     if (values[key] != null) return values[key]
-    if (key === 'LLM_PROVIDER') return 'copilot'
-    if (key === 'COPILOT_MODEL_SOURCE') return 'github-hosted'
     if (key === 'SHOW_TOOL_CALLING_MESSAGES') return '0'
     return ''
   }
 
   function validate(valuesToSave: Record<string, string>): string | null {
-    const provider = valuesToSave.LLM_PROVIDER || 'copilot'
-    const modelSource = valuesToSave.COPILOT_MODEL_SOURCE || 'github-hosted'
-
     if (!valuesToSave.MODEL_NAME?.trim()) {
       return 'Model Name is required.'
     }
 
-    if (provider === 'copilot') {
-      if (!valuesToSave.GITHUB_TOKEN?.trim()) {
-        return 'GitHub Token is required for the GitHub Copilot provider.'
-      }
-      if (modelSource === 'azure-openai' && !valuesToSave.AZURE_OPENAI_ENDPOINT?.trim()) {
-        return 'Azure OpenAI Endpoint is required when Copilot is configured for self-serving Azure OpenAI / Foundry.'
-      }
-    }
-
-    if (provider === 'openai' && !valuesToSave.OPENAI_API_KEY?.trim()) {
-      return 'OpenAI API Key is required for the OpenAI provider.'
-    }
-
-    if (provider === 'azure-openai' && !valuesToSave.AZURE_OPENAI_ENDPOINT?.trim()) {
-      return 'Azure OpenAI Endpoint is required for the Azure OpenAI provider.'
-    }
-
-    if (provider === 'claude' && !valuesToSave.ANTHROPIC_API_KEY?.trim()) {
-      return 'Anthropic API Key is required for the Claude provider.'
+    if (!valuesToSave.GITHUB_TOKEN?.trim()) {
+      return 'GitHub Token is required.'
     }
 
     return null
@@ -201,8 +90,6 @@ export function SettingsModal({ onClose }: Props) {
     window.electronAPI.settings.get()
       .then((v) => {
         setValues({
-          LLM_PROVIDER: 'copilot',
-          COPILOT_MODEL_SOURCE: 'github-hosted',
           SHOW_TOOL_CALLING_MESSAGES: '0',
           ...v,
         })
@@ -277,23 +164,21 @@ export function SettingsModal({ onClose }: Props) {
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
                 The preview panel renders local slide images from the generated PPTX on Windows. This requires Microsoft PowerPoint to be installed.
               </p>
-              {selectedProvider === 'copilot' ? (
-                <div className="border px-3 py-2" style={{ borderColor: 'var(--panel-border)', background: 'var(--surface-hover)' }}>
-                  <p className="text-[11px] font-semibold" style={{ color: 'var(--text-primary)' }}>
-                    GitHub Copilot mode
-                  </p>
-                  <p className="mt-1 text-[11px] leading-4" style={{ color: 'var(--text-muted)' }}>
-                    GitHub Token is required. Azure OpenAI settings are only used when Copilot Model Source is set to self-serving Azure OpenAI / Foundry.
-                  </p>
-                </div>
-              ) : null}
+              <div className="border px-3 py-2" style={{ borderColor: 'var(--panel-border)', background: 'var(--surface-hover)' }}>
+                <p className="text-[11px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                  GitHub Copilot mode
+                </p>
+                <p className="mt-1 text-[11px] leading-4" style={{ color: 'var(--text-muted)' }}>
+                  The app uses GitHub Copilot with GitHub-hosted models for chat, deck generation, and palette generation.
+                </p>
+              </div>
               {error ? (
                 <div className="border px-3 py-2 text-[11px]" style={{ borderColor: 'rgba(220, 38, 38, 0.35)', background: 'rgba(220, 38, 38, 0.08)', color: '#b91c1c' }}>
                   {error}
                 </div>
               ) : null}
 
-              {visibleFields.map(({ key, label, placeholder, secret, hint, options, optional }) => (
+              {FIELDS.map(({ key, label, placeholder, secret, hint, options, optional }) => (
                 <div key={key} className="flex flex-col gap-1.5">
                   <label className="flex items-center gap-2 text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
                     {label}
